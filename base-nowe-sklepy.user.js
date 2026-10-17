@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.8
+// @version      1.9
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -140,7 +140,7 @@
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
-      <b style="margin-right:auto">📂 Nowe sklepy</b>
+      <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
       ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
@@ -151,7 +151,44 @@
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const p = panel.querySelector('#ns-pauza'); if (p) p.onclick = () => { const z = zad(); z.pauza = !z.pauza; zapiszZad(z); rysujPanel(); if (!z.pauza) setTimeout(() => location.reload(), 300); };
     const s = panel.querySelector('#ns-stop'); if (s) s.onclick = () => { if (confirm('ZATRZYMAĆ bota? (to, co zrobione, zostaje w Base)')) { localStorage.removeItem(L_Z); log('⏹ zatrzymane ręcznie'); setTimeout(() => location.reload(), 200); } };
+    if (panel.style.top && panel.style.top !== 'auto') requestAnimationFrame(() => ustawPozycje(parseFloat(panel.style.left) || 0, parseFloat(panel.style.top) || 0));
   }
+
+  // ---- przesuwanie panelu (chwyć za „⠿ 📂 Nowe sklepy”) + zapamiętanie miejsca w tym profilu ----
+  const L_POZ_NS = 'nsPanelPozycja';
+  function ustawPozycje(x, y) {
+    const r = panel.getBoundingClientRect();
+    x = Math.min(Math.max(0, x), window.innerWidth - Math.min(r.width, window.innerWidth));
+    y = Math.min(Math.max(0, y), window.innerHeight - Math.min(r.height, window.innerHeight));
+    panel.style.left = x + 'px'; panel.style.top = y + 'px';
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+  }
+  try { const poz = JSON.parse(localStorage.getItem(L_POZ_NS) || 'null'); if (poz) requestAnimationFrame(() => ustawPozycje(poz.x, poz.y)); } catch {}
+  let ciagnie = null;
+  panel.addEventListener('pointerdown', e => {
+    if (!e.target.closest || !e.target.closest('#ns-uchwyt')) return;
+    const r = panel.getBoundingClientRect();
+    ciagnie = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    try { panel.setPointerCapture(e.pointerId); } catch {}
+    const u = panel.querySelector('#ns-uchwyt'); if (u) u.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  panel.addEventListener('pointermove', e => { if (ciagnie) ustawPozycje(e.clientX - ciagnie.dx, e.clientY - ciagnie.dy); });
+  const puscPanel = () => {
+    if (!ciagnie) return;
+    ciagnie = null;
+    const u = panel.querySelector('#ns-uchwyt'); if (u) u.style.cursor = 'grab';
+    const r = panel.getBoundingClientRect();
+    try { localStorage.setItem(L_POZ_NS, JSON.stringify({ x: r.left, y: r.top })); } catch {}
+  };
+  panel.addEventListener('pointerup', puscPanel);
+  panel.addEventListener('pointercancel', puscPanel);
+  panel.addEventListener('dblclick', e => {
+    if (!e.target.closest || !e.target.closest('#ns-uchwyt')) return;
+    try { localStorage.removeItem(L_POZ_NS); } catch {}
+    panel.style.left = 'auto'; panel.style.top = 'auto'; panel.style.right = '12px'; panel.style.bottom = '56px';
+  });
+  window.addEventListener('resize', () => { if (panel.style.top && panel.style.top !== 'auto') ustawPozycje(parseFloat(panel.style.left) || 0, parseFloat(panel.style.top) || 0); });
 
   const nakladka = html => {
     const o = document.createElement('div');
