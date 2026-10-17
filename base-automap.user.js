@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-1
+// @version      2026.10.17-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -207,6 +207,11 @@
   const lsJson = (k) => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
   const spis = () => new Set(lsJson(L_SPIS).map(String));
   const dodajDoSpisu = ids => { const s = spis(); ids.forEach(i => s.add(String(i))); lsSet(L_SPIS, JSON.stringify([...s])); };
+  // tryb „🔁 bez oferty”: każdy produkt bierzemy w danym katalogu najwyżej RAZ (potem pomijamy – koniec pętli z błędnymi/niedopasowanymi)
+  const kluczBezOferty = kat => 'autoSpisBezOferty_' + kat;
+  const spisBezOferty = kat => new Set(lsJson(kluczBezOferty(kat)).map(String));
+  const dodajDoSpisuBezOferty = (kat, ids) => { const s = spisBezOferty(kat); ids.forEach(i => s.add(String(i))); lsSet(kluczBezOferty(kat), JSON.stringify([...s].slice(-80000))); };
+  const wyczyscSpisyBezOferty = () => { try { Object.keys(localStorage).filter(k => k.startsWith('autoSpisBezOferty_')).forEach(k => localStorage.removeItem(k)); localStorage.removeItem('autoOstatniaPaczka'); } catch {} };
   const cyklWlaczony = () => lsGet(L_CYKL) === '1';
   if (lsGet(L_AUTO) === null) lsSet(L_AUTO, '0');   // start w trybie RĘCZNYM
 
@@ -635,7 +640,7 @@
         <div style="font-weight:bold;margin-bottom:6px">🔎 Filtry katalogu (przy braniu paczki)</div>
         <div style="font-size:12.5px;opacity:.8;margin-bottom:6px">Zawsze: Stan ≥ 1${procesKlucz() === 'finalne' ? ' i Marketplace (oferta) zawiera dowolne konto' : ''}.</div>
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="kr-bezoferty" ${lsGet('autoBezOferty') === '1' ? 'checked' : ''} style="margin-top:3px">
-          <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Po naprawie odznacz.</span></label>
+          <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Każdy produkt najwyżej raz na katalog – błędne i niedopasowane nie wracają w kółko. Po naprawie odznacz.</span></label>
       </div>
       <div style="background:#263445;border-radius:8px;padding:10px;margin-top:12px">
         <div style="font-weight:bold;margin-bottom:6px">⚡ Szybko dodaj (kliknij parametr)</div>
@@ -761,6 +766,7 @@
     $('#kr-zapisz').onclick = () => {
       if (pracuje) { alert('Najpierw zatrzymaj skrypt (⏸), potem zapisz kroki.'); return; }
       zachowajBiezace();
+      if ($('#kr-bezoferty').checked && lsGet('autoBezOferty') !== '1') wyczyscSpisyBezOferty();   // nowa runda naprawy
       lsSet('autoBezOferty', $('#kr-bezoferty').checked ? '1' : '0');
       zapiszProfile(profile);
       localStorage.setItem(L_PROFIL_AKT, nazwaProfilu);
@@ -1052,6 +1058,22 @@
       }
       powiadom('⚠️ Paczka się NIE wystawiła', 'Wzięto ' + zPaczki.length + ', wystawiono 0. Produkty NIE trafiły do spisu – bot weźmie je jeszcze raz.\n' + PROCES.nazwa + ' · ' + ((oczek && oczek.konto) || ''), { priorytet: 5, tagi: ['warning'] });
     } else { lsDel('autoNieWyszlaLicz'); if (wszystkieIds.length) dodajDoSpisu(wszystkieIds); }
+    const katP = (oczek && oczek.katId) || lsGet(L_KATALOG, '') || '';
+    if (oczek && oczek.bezOferty && katP) {               // tryb „bez oferty”: wzięte raz → w tym katalogu już nie wracają
+      const doBO = nieWyszla ? idsPrzed.filter(id => !ids.map(String).includes(String(id))) : wszystkieIds;
+      if (doBO.length && (!nieWyszla || ids.length)) dodajDoSpisuBezOferty(katP, doBO);
+    }
+    lsSet('autoOstatniaPaczka', JSON.stringify({ kat: katP, ids: zPaczki.map(String), nieWyszla, t: Date.now() }));
+    if (!opcje.pusta && !nieWyszla && liczniki) {         // 2 paczki z rzędu z 0 dobrych (same błędy) → stop
+      if ((Number(liczniki.sent) || 0) === 0) {
+        const z = (parseInt(lsGet('autoZeroDobrychLicz', '0')) || 0) + 1;
+        lsSet('autoZeroDobrychLicz', String(z));
+        if (z >= 2) {
+          lsDel('autoZeroDobrychLicz');
+          zatrzymajCykl('2 PACZKI Z RZĘDU – 0 DOBRYCH', ((oczek && oczek.konto) || '') + ': dwie paczki pod rząd dały same błędy. Zajrzyj w błędy w Base, zanim puścisz dalej.');
+        }
+      } else lsDel('autoZeroDobrychLicz');
+    }
     lsDel(L_OCZEKUJACA);
     const przed = parseInt(sessionStorage.getItem('am_' + LID + '_przedNiedop'));
     const po = parseInt(sessionStorage.getItem('am_' + LID + '_poNiedop'));
@@ -2171,6 +2193,13 @@
 
   // duży alarm na ekranie + pikanie do skutku
   let alarmPik = null;
+  function zatrzymajCykl(tytul, tekst) {
+    lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
+    try { status('STOP: ' + tytul); } catch {}
+    pokazAlarm(tytul, tekst);
+    powiadom('🛑 ' + tytul, tekst + '\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'] });
+    try { odswiezPrzyciski(); } catch {}
+  }
   function pokazAlarm(tytul, tekst) {
     schowajAlarm();
     const o = document.createElement('div');
@@ -3240,7 +3269,7 @@
     const PACZKA = paczka();
     for (let strona = 0; strona < 50 && wybrane.length < PACZKA; strona++) {
       if (stop()) return;
-      const s = bezOferty ? new Set() : spis();          // „bez oferty” – filtr Base sam pomija wystawione, spis nie blokuje
+      const s = bezOferty ? spisBezOferty(katId) : spis();   // „bez oferty” – spis nie blokuje, ale każdy produkt tylko raz na katalog
       const ids = wierszeProduktow().map(idZWiersza).filter(id => !s.has(id) && !wybrane.includes(id));
       wybrane.push(...ids.slice(0, PACZKA - wybrane.length));
       status('zebrano ' + wybrane.length + ' niewysłanych');
@@ -3273,6 +3302,19 @@
       await koniecKatalogu(katId, katNazwa);
       return;
     }
+
+    // bezpiecznik: prawie ta sama paczka co poprzednio (a poprzednia się wystawiła) = pętla → stop
+    try {
+      const ost = JSON.parse(lsGet('autoOstatniaPaczka') || 'null');
+      if (ost && ost.kat === katId && !ost.nieWyszla && Array.isArray(ost.ids) && ost.ids.length) {
+        const pop = new Set(ost.ids.map(String));
+        const wspolne = wybrane.filter(id => pop.has(String(id))).length;
+        if (wspolne >= 0.8 * wybrane.length) {
+          zatrzymajCykl('PĘTLA – TA SAMA PACZKA', katNazwa + ': ' + wspolne + ' z ' + wybrane.length + ' produktów było już w poprzedniej paczce. Zatrzymałem, żeby nie mielić w kółko (i nie robić duplikatów).');
+          return;
+        }
+      }
+    } catch {}
 
     // otwórz okno "Wystaw zaznaczone" z naszymi ID
     status('tworzę wystawianie dla ' + wybrane.length + ' produktów…');
@@ -3311,7 +3353,7 @@
     if (!wykonaj) { status('brak przycisku Wykonaj'); return; }
 
     // do spisu trafią dopiero po zakończeniu wystawiania – na razie paczka "w toku"
-    lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(),
+    lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(), katId, bezOferty,
       katNazwa, grupa: grupa ? grupa.nazwa : '', cennik: grupa ? grupa.cennik : '' }));
     lsSet(L_POMIAR, JSON.stringify({ n: wybrane.length, start: Date.now(), konto: konto.text }));
     lsSet(L_ETAP, 'lista');
