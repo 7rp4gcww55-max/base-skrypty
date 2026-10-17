@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-2
+// @version      2026.10.17-3
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1097,10 +1097,20 @@
       niewyslane: opcje.pusta ? 0 : (liczniki ? liczniki.draft : null),
       bezWystawienia: !!opcje.pusta,
       pominiete: (nieWyszla ? ['⚠ NIE WYSTAWIONO – produkty wracają do kolejki'] : []).concat(opisPominietych()),   // kroki, których nie dało się zrobić
-      odrzucone: (() => { try { return JSON.parse(sessionStorage.getItem('am_' + LID + '_odrzucone') || '[]'); } catch { return []; } })() // ID nie wczytane przez Base
+      odrzucone: (() => { try { return JSON.parse(sessionStorage.getItem('am_' + LID + '_odrzucone') || '[]'); } catch { return []; } })(), // ID nie wczytane przez Base
+      powtorzone: oczek && oczek.powtorzone != null ? oczek.powtorzone : null,   // ile ID było już w poprzedniej paczce
+      bezOferty: !!(oczek && oczek.bezOferty),
+      wersja: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || ''
     };
     raport.push(wpis);
     lsSet(L_RAPORT, JSON.stringify(raport.slice(-500)));
+    {
+      const ost3 = raport.slice(-3);
+      const slabe = w => !w.bezWystawienia && (Number(w.probowano) || 0) >= 50 && (Number(w.dobre) || 0) / (Number(w.probowano) || 1) < 0.15;
+      if (ost3.length === 3 && ost3.every(w => w.konto === wpis.konto && slabe(w)) && cyklWlaczony()) {
+        zatrzymajCykl('3 PACZKI Z RZĘDU PONIŻEJ 15%', (wpis.konto || '') + ': trzy paczki pod rząd z bardzo małą liczbą dobrych (' + ost3.map(w => (w.dobre || 0) + '/' + w.probowano).join(', ') + '). Zatrzymałem – sprawdź błędy / niedopasowane w Base.');
+      }
+    }
     if (!opcje.pusta) lsDel('autoNiedopProba');   // udana paczka – licznik „cała paczka niedopasowana” od nowa
     powiadom(wpis.bezWystawienia ? '↷ Paczka bez wystawienia' : '📦 Wystawiono paczkę nr ' + wpis.nr,
       'Wzięto ' + wpis.probowano + ' · niedopasowane ' + (wpis.niedopasowane ?? '?') + (wpis.odrzucone.length ? ' · odrzucone przez Base ' + wpis.odrzucone.length : '') + '\nWystawione ' + (wpis.dobre ?? '?') + ' · błędne ' + (wpis.bledne ?? '?') + (wpis.pominiete.length ? '\n⚠️ Pominięte: ' + wpis.pominiete.join(', ') : '') + '\n' + PROCES.nazwa + ' · ' + (wpis.konto || ''),
@@ -1131,8 +1141,8 @@
         <div style="background:#263445;padding:8px 12px;border-radius:8px">Skuteczność (dobre / wzięte)<br><b style="font-size:18px">${pr(suma('dobre'), sumaProb)}</b></div>
       </div>
       ${r.length ? `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
-        <tr style="opacity:.7"><td style="${td};text-align:left">Nr</td><td style="${td};text-align:left">Data i godzina</td><td style="${td};text-align:left">Proces</td><td style="${td};text-align:left">Konto</td><td style="${td}">Wzięto</td><td style="${td}">Niedopas.</td><td style="${td}">Do wyst.</td><td style="${td}">Dobre</td><td style="${td}">Błędne</td><td style="${td}">Skut.</td><td style="${td}">Odrzuc. Base</td><td style="${td};text-align:left">Pominięte kroki</td></tr>
-        ${r.map(w => `<tr${w.bezWystawienia ? ' style="opacity:.75"' : ''}><td style="${td};text-align:left">${w.nr}</td><td style="${td};text-align:left">${w.data}</td><td style="${td};text-align:left">${w.proces || ''}</td><td style="${td};text-align:left">${w.konto || ''}</td><td style="${td}">${proba(w) ?? '?'}</td><td style="${td};color:#ffb74d">${w.niedopasowane ?? '?'}</td><td style="${td}">${w.wszystkie ?? '?'}</td><td style="${td};color:#81c784;font-weight:bold">${w.dobre ?? '?'}</td><td style="${td};color:#e57373">${w.bledne ?? '?'}</td><td style="${td}">${w.bezWystawienia ? 'wszystkie niedopas.' : pr(w.dobre || 0, proba(w))}</td><td style="${td}" title="${(w.odrzucone || []).join(', ')}">${(w.odrzucone || []).length ? w.odrzucone.length + ' ⓘ' : '–'}</td><td style="${td};text-align:left;color:#ffb74d;white-space:normal;max-width:220px">${(w.pominiete || []).join(', ') || '–'}</td></tr>`).join('')}
+        <tr style="opacity:.7"><td style="${td};text-align:left">Nr</td><td style="${td};text-align:left">Data i godzina</td><td style="${td};text-align:left">Proces</td><td style="${td};text-align:left">Konto</td><td style="${td}">Wzięto</td><td style="${td}" title="ile produktów było już w poprzedniej paczce">Powt.</td><td style="${td}">Niedopas.</td><td style="${td}">Do wyst.</td><td style="${td}">Dobre</td><td style="${td}">Błędne</td><td style="${td}">Skut.</td><td style="${td}">Odrzuc. Base</td><td style="${td};text-align:left">Pominięte kroki</td></tr>
+        ${r.map(w => `<tr${w.bezWystawienia ? ' style="opacity:.75"' : ''}><td style="${td};text-align:left">${w.nr}</td><td style="${td};text-align:left">${w.data}</td><td style="${td};text-align:left" title="${w.wersja || ''}">${w.proces || ''}${w.bezOferty ? ' 🔁' : ''}</td><td style="${td};text-align:left">${w.konto || ''}</td><td style="${td}">${proba(w) ?? '?'}</td><td style="${td};color:${(w.powtorzone || 0) > 0 ? '#e57373' : 'inherit'}">${w.powtorzone ?? '–'}</td><td style="${td};color:#ffb74d">${w.niedopasowane ?? '?'}</td><td style="${td}">${w.wszystkie ?? '?'}</td><td style="${td};color:#81c784;font-weight:bold">${w.dobre ?? '?'}</td><td style="${td};color:#e57373">${w.bledne ?? '?'}</td><td style="${td}">${w.bezWystawienia ? 'wszystkie niedopas.' : pr(w.dobre || 0, proba(w))}</td><td style="${td}" title="${(w.odrzucone || []).join(', ')}">${(w.odrzucone || []).length ? w.odrzucone.length + ' ⓘ' : '–'}</td><td style="${td};text-align:left;color:#ffb74d;white-space:normal;max-width:220px">${(w.pominiete || []).join(', ') || '–'}</td></tr>`).join('')}
       </table>` : '<div style="opacity:.8">Brak wpisów – pojawią się po pierwszym zakończonym wystawianiu.</div>'}
       <div style="font-size:12px;opacity:.65;margin-top:10px">Wszystkie wzięte produkty (także niedopasowane i błędne) trafiają do spisu 📋 i nie są brane ponownie.</div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
@@ -3303,13 +3313,15 @@
       return;
     }
 
-    // bezpiecznik: prawie ta sama paczka co poprzednio (a poprzednia się wystawiła) = pętla → stop
+    // bezpiecznik: połowa paczki taka sama jak poprzednio (a poprzednia się wystawiła) = pętla → stop
+    let powtorzone = null;
     try {
       const ost = JSON.parse(lsGet('autoOstatniaPaczka') || 'null');
-      if (ost && ost.kat === katId && !ost.nieWyszla && Array.isArray(ost.ids) && ost.ids.length) {
+      if (ost && ost.kat === katId && Array.isArray(ost.ids) && ost.ids.length) {
         const pop = new Set(ost.ids.map(String));
         const wspolne = wybrane.filter(id => pop.has(String(id))).length;
-        if (wspolne >= 0.8 * wybrane.length) {
+        powtorzone = wspolne;
+        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length) {
           zatrzymajCykl('PĘTLA – TA SAMA PACZKA', katNazwa + ': ' + wspolne + ' z ' + wybrane.length + ' produktów było już w poprzedniej paczce. Zatrzymałem, żeby nie mielić w kółko (i nie robić duplikatów).');
           return;
         }
@@ -3353,7 +3365,7 @@
     if (!wykonaj) { status('brak przycisku Wykonaj'); return; }
 
     // do spisu trafią dopiero po zakończeniu wystawiania – na razie paczka "w toku"
-    lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(), katId, bezOferty,
+    lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(), katId, bezOferty, powtorzone,
       katNazwa, grupa: grupa ? grupa.nazwa : '', cennik: grupa ? grupa.cennik : '' }));
     lsSet(L_POMIAR, JSON.stringify({ n: wybrane.length, start: Date.now(), konto: konto.text }));
     lsSet(L_ETAP, 'lista');
