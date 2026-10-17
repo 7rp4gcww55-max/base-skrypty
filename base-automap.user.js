@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-3
+// @version      2026.10.17-4
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1056,7 +1056,7 @@
         lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0'); lsDel('autoNieWyszlaLicz');
         pokazAlarm('2 PACZKI Z RZĘDU SIĘ NIE WYSTAWIŁY', 'Zatrzymałem cykl. Sprawdź Base / konto Allegro i włącz ponownie.');
       }
-      powiadom('⚠️ Paczka się NIE wystawiła', 'Wzięto ' + zPaczki.length + ', wystawiono 0. Produkty NIE trafiły do spisu – bot weźmie je jeszcze raz.\n' + PROCES.nazwa + ' · ' + ((oczek && oczek.konto) || ''), { priorytet: 5, tagi: ['warning'] });
+      powiadom('⚠️ Paczka się NIE wystawiła', 'Wzięto ' + zPaczki.length + ', wystawiono 0. Produkty są już w spisie 📋 (nie wrócą same) – sprawdź Base / konto Allegro.\n' + PROCES.nazwa + ' · ' + ((oczek && oczek.konto) || ''), { priorytet: 5, tagi: ['warning'] });
     } else { lsDel('autoNieWyszlaLicz'); if (wszystkieIds.length) dodajDoSpisu(wszystkieIds); }
     const katP = (oczek && oczek.katId) || lsGet(L_KATALOG, '') || '';
     if (oczek && oczek.bezOferty && katP) {               // tryb „bez oferty”: wzięte raz → w tym katalogu już nie wracają
@@ -1096,7 +1096,7 @@
       bledne: opcje.pusta ? 0 : (liczniki ? liczniki.error : null),
       niewyslane: opcje.pusta ? 0 : (liczniki ? liczniki.draft : null),
       bezWystawienia: !!opcje.pusta,
-      pominiete: (nieWyszla ? ['⚠ NIE WYSTAWIONO – produkty wracają do kolejki'] : []).concat(opisPominietych()),   // kroki, których nie dało się zrobić
+      pominiete: (nieWyszla ? ['⚠ NIE WYSTAWIONO – produkty są w spisie 📋'] : []).concat(opisPominietych()),   // kroki, których nie dało się zrobić
       odrzucone: (() => { try { return JSON.parse(sessionStorage.getItem('am_' + LID + '_odrzucone') || '[]'); } catch { return []; } })(), // ID nie wczytane przez Base
       powtorzone: oczek && oczek.powtorzone != null ? oczek.powtorzone : null,   // ile ID było już w poprzedniej paczce
       bezOferty: !!(oczek && oczek.bezOferty),
@@ -3364,7 +3364,9 @@
       .find(b => /Wykonaj/i.test(b.value || b.textContent));
     if (!wykonaj) { status('brak przycisku Wykonaj'); return; }
 
-    // do spisu trafią dopiero po zakończeniu wystawiania – na razie paczka "w toku"
+    // CAŁA paczka trafia do spisu OD RAZU przy pobraniu – dobre, błędne i niedopasowane już nigdy nie wrócą
+    dodajDoSpisu(wybrane);
+    if (bezOferty && katId) dodajDoSpisuBezOferty(katId, wybrane);
     lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(), katId, bezOferty, powtorzone,
       katNazwa, grupa: grupa ? grupa.nazwa : '', cennik: grupa ? grupa.cennik : '' }));
     lsSet(L_POMIAR, JSON.stringify({ n: wybrane.length, start: Date.now(), konto: konto.text }));
