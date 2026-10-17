@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-4
+// @version      2026.10.17-5
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1026,6 +1026,19 @@
     let pom = [];
     try { pom = JSON.parse(sessionStorage.getItem(K_SKIP) || '[]'); } catch {}
     return pom.map(n => n + (m[n] ? ' (' + String(m[n]).replace(/^pomijam\s*/i, '').replace(/[()]/g, '') + ')' : ''));
+  }
+
+  // klik WYSTAW = cała pobrana paczka (dobre, błędne, niedopasowane) idzie na listę 📋 i już nie wróci
+  function zapiszPaczkeDoSpisuPrzyWystaw() {
+    try {
+      const oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null');
+      if (!oczek || !Array.isArray(oczek.ids) || !oczek.ids.length || oczek.wSpisie) return;
+      dodajDoSpisu(oczek.ids);
+      if (oczek.bezOferty && oczek.katId) dodajDoSpisuBezOferty(oczek.katId, oczek.ids);
+      oczek.wSpisie = Date.now();
+      localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oczek));
+      odswiezPrzyciski();
+    } catch {}
   }
 
   async function zapiszPoWystawieniu(opcje = {}) {
@@ -2309,6 +2322,7 @@
       const w = document.getElementById('button_sell_start');
       if (!w) { status('nie znalazłem przycisku Wystaw oferty'); return; }
       if (pomiar()) zapiszPomiar({ wystaw: Date.now() });
+      zapiszPaczkeDoSpisuPrzyWystaw();
       w.click();
       await czekajNaKoniecWysylania();
       await zapiszPoWystawieniu();
@@ -3364,9 +3378,7 @@
       .find(b => /Wykonaj/i.test(b.value || b.textContent));
     if (!wykonaj) { status('brak przycisku Wykonaj'); return; }
 
-    // CAŁA paczka trafia do spisu OD RAZU przy pobraniu – dobre, błędne i niedopasowane już nigdy nie wrócą
-    dodajDoSpisu(wybrane);
-    if (bezOferty && katId) dodajDoSpisuBezOferty(katId, wybrane);
+    // paczka zapamiętana jako „w toku” – do spisu trafi CAŁA (500) w chwili kliknięcia WYSTAW
     lsSet(L_OCZEKUJACA, JSON.stringify({ ids: wybrane, proces: procesKlucz(), konto: konto.text, t: Date.now(), katId, bezOferty, powtorzone,
       katNazwa, grupa: grupa ? grupa.nazwa : '', cennik: grupa ? grupa.cennik : '' }));
     lsSet(L_POMIAR, JSON.stringify({ n: wybrane.length, start: Date.now(), konto: konto.text }));
