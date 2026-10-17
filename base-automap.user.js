@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-5
+// @version      2026.10.17-6
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -3335,6 +3335,13 @@
         const pop = new Set(ost.ids.map(String));
         const wspolne = wybrane.filter(id => pop.has(String(id))).length;
         powtorzone = wspolne;
+        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length && bezOferty && !wezPaczke.__poprawka) {
+          // tryb „bez oferty”: poprzednia paczka była już wystawiana → jej produkty na listę tego katalogu i bierzemy dalej
+          dodajDoSpisuBezOferty(katId, ost.ids);
+          status('pomijam ' + wspolne + ' produktów z poprzedniej paczki – biorę nowe…');
+          wezPaczke.__poprawka = true;
+          try { return await wezPaczke(); } finally { wezPaczke.__poprawka = false; }
+        }
         if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length) {
           zatrzymajCykl('PĘTLA – TA SAMA PACZKA', katNazwa + ': ' + wspolne + ' z ' + wybrane.length + ' produktów było już w poprzedniej paczce. Zatrzymałem, żeby nie mielić w kółko (i nie robić duplikatów).');
           return;
