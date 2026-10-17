@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.17-6
+// @version      2026.10.18-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1028,16 +1028,28 @@
     return pom.map(n => n + (m[n] ? ' (' + String(m[n]).replace(/^pomijam\s*/i, '').replace(/[()]/g, '') + ')' : ''));
   }
 
-  // klik WYSTAW = cała pobrana paczka (dobre, błędne, niedopasowane) idzie na listę 📋 i już nie wróci
+  // na listę 📋 idą TYLKO produkty, które weszły do formularza (dobre, błędne, niedopasowane).
+  // Te, których Base nie wczytał („Wystąpił błąd przy pobieraniu formularza”), NIE idą – wrócą w kolejnej paczce.
+  const odrzuconeTejPaczki = () => { try { return new Set(JSON.parse(sessionStorage.getItem('am_' + LID + '_odrzucone') || '[]').map(String)); } catch { return new Set(); } };
+  function zapiszWczytaneDoSpisu(ids) {
+    try {
+      if (!ids || !ids.length) return;
+      const oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null');
+      dodajDoSpisu(ids);
+      if (oczek && oczek.bezOferty && oczek.katId) dodajDoSpisuBezOferty(oczek.katId, ids);
+      if (oczek) { oczek.wSpisie = Date.now(); localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oczek)); }
+      odswiezPrzyciski();
+    } catch {}
+  }
+  // klik WYSTAW – zapas, gdyby nie było kroku „Usuń niedopasowane”
   function zapiszPaczkeDoSpisuPrzyWystaw() {
     try {
       const oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null');
-      if (!oczek || !Array.isArray(oczek.ids) || !oczek.ids.length || oczek.wSpisie) return;
-      dodajDoSpisu(oczek.ids);
-      if (oczek.bezOferty && oczek.katId) dodajDoSpisuBezOferty(oczek.katId, oczek.ids);
-      oczek.wSpisie = Date.now();
-      localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oczek));
-      odswiezPrzyciski();
+      if (!oczek || oczek.wSpisie) return;
+      let ids = [];
+      try { ids = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
+      if (!ids.length && Array.isArray(oczek.ids)) { const odrz = odrzuconeTejPaczki(); ids = oczek.ids.filter(id => !odrz.has(String(id))); }
+      zapiszWczytaneDoSpisu(ids);
     } catch {}
   }
 
@@ -1055,8 +1067,9 @@
     // do spisu: WSZYSTKO, co próbowaliśmy wystawić – także usunięte jako niedopasowane (żeby nie wracały w kółko)
     let idsPrzed = [];
     try { idsPrzed = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
+    const odrzP = odrzuconeTejPaczki();
     const zPaczki = [...new Set([...((oczek && oczek.ids) || []), ...idsPrzed])];
-    const wszystkieIds = [...new Set([...zPaczki, ...ids])];
+    const wszystkieIds = [...new Set([...zPaczki, ...ids])].filter(id => !odrzP.has(String(id)));   // niewczytane przez Base wracają do kolejki
     // paczka, która się NIE wystawiła (0 dobrych i 0 błędnych / brak liczników) – NIE dopisuj do spisu, wróci w następnej paczce
     const nieWyszla = !opcje.pusta && (!liczniki || ((Number(liczniki.sent) || 0) + (Number(liczniki.error) || 0) === 0));
     if (nieWyszla) {
@@ -1076,7 +1089,7 @@
       const doBO = nieWyszla ? idsPrzed.filter(id => !ids.map(String).includes(String(id))) : wszystkieIds;
       if (doBO.length && (!nieWyszla || ids.length)) dodajDoSpisuBezOferty(katP, doBO);
     }
-    lsSet('autoOstatniaPaczka', JSON.stringify({ kat: katP, ids: zPaczki.map(String), nieWyszla, t: Date.now() }));
+    lsSet('autoOstatniaPaczka', JSON.stringify({ kat: katP, ids: zPaczki.map(String).filter(id => !odrzP.has(id)), nieWyszla, t: Date.now() }));   // tylko wczytane – niewczytane mają prawo wrócić
     if (!opcje.pusta && !nieWyszla && liczniki) {         // 2 paczki z rzędu z 0 dobrych (same błędy) → stop
       if ((Number(liczniki.sent) || 0) === 0) {
         const z = (parseInt(lsGet('autoZeroDobrychLicz', '0')) || 0) + 1;
@@ -1740,7 +1753,10 @@
       if (r.wynik) sessionStorage.setItem(K_PRZED, String(r.wynik.n));
       // zapamiętaj ID wszystkich produktów PRZED usunięciem (niedopasowane też trafią do spisu)
       const ri = await bazaBase('idsProduktow', {}, 30000);
-      if (ri.wynik && ri.wynik.ids) sessionStorage.setItem('am_' + LID + '_idsPrzed', JSON.stringify(ri.wynik.ids));
+      if (ri.wynik && ri.wynik.ids) {
+        sessionStorage.setItem('am_' + LID + '_idsPrzed', JSON.stringify(ri.wynik.ids));
+        zapiszWczytaneDoSpisu(ri.wynik.ids);           // wczytane (także niedopasowane) → lista 📋, dopiero potem usuwanie
+      }
     }
     ustawSelect(sel, k.wartosc);
     await czekaj(500);
@@ -2357,8 +2373,22 @@
     const K_ZNANA = 'am_' + LID + '_ileProduktow';
     const znana = parseInt(sessionStorage.getItem(K_ZNANA)) || 0;
     const start = Date.now();
-    let poprz = -1, stabilnie = 0, ile = 0, ostatniaLiczba = -1, zmianaCzas = Date.now();
+    let poprz = -1, stabilnie = 0, ile = 0, ostatniaLiczba = -1, zmianaCzas = Date.now(), bladFormularza = false;
+    const zamknijBladFormularza = () => {
+      const okna = [...document.querySelectorAll('.modal, .swal2-popup, .bootbox, [role="dialog"], .jconfirm-box, .toast, .alert')]
+        .filter(e => e.getClientRects().length && /błąd przy pobieraniu formularza|wystąpił błąd/i.test(e.innerText || ''));
+      if (!okna.length) return false;
+      for (const o of okna) {
+        const b = [...o.querySelectorAll('button, a.btn, .close, input[type="button"]')].find(x => x.getClientRects().length && /^(ok|zamknij|close|×|x)$/i.test((x.innerText || x.value || x.getAttribute('aria-label') || '').trim()))
+          || o.querySelector('.close, [data-dismiss="modal"], .swal2-confirm');
+        try { b && b.click(); } catch {}
+      }
+      return true;
+    };
     while (Date.now() - start < 10 * 60000) {                  // max 10 min
+      if (zamknijBladFormularza()) {
+        if (!bladFormularza) { bladFormularza = true; zmianaCzas = Date.now(); status('Base: błąd przy pobieraniu formularza – czekam chwilę i biorę to, co się wczytało…'); }
+      }
       if (await mostOk()) {
         const r = await bazaBase('test', {}, 20000);
         ile = (r.wynik && r.wynik.n) || 0;
@@ -2374,8 +2404,8 @@
       // Base sam pokazuje, ile ma w wystawianiu (np. 497) – jak tyle wczytał i liczba stoi 2 s, to więcej nie będzie
       if (!znana && naStronie && ile >= naStronie && stabilnie >= 2 && !laduje()) break;
       if (ile !== ostatniaLiczba) { ostatniaLiczba = ile; zmianaCzas = Date.now(); }
-      // liczba stoi (pierwszy raz 30 s, po odświeżeniu 10 s) – Base odrzucił kilka produktów, ruszamy z tym, co jest
-      if (ile > 0 && !laduje() && Date.now() - zmianaCzas > (znana ? 10000 : 30000)) {
+      // liczba stoi (pierwszy raz 30 s, po odświeżeniu 10 s; po błędzie formularza 8 s) – ruszamy z tym, co jest
+      if (ile > 0 && !laduje() && Date.now() - zmianaCzas > (bladFormularza ? 8000 : znana ? 10000 : 30000)) {
         if (cel && ile < cel) status('wczytano ' + ile + ' z ' + cel + ' – Base odrzucił ' + (cel - ile) + ', ruszam');
         break;
       }
