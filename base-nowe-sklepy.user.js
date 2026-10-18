@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.15
+// @version      1.16
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -937,10 +937,13 @@
   const OSOBA_Z = 'Marcel Teschner', OSOBA_NA = NADAWCA.sender_person;
   function wszystkieWza() {
     const m = new Map();
-    for (const tr of document.querySelectorAll('tr')) {
-      const del = tr.querySelector('[onclick*="disableIntegration(\'allegrokurier\'"]'); if (!del) continue;
-      const id = (del.getAttribute('onclick').match(/allegrokurier',\s*'(\d+)'/) || [])[1];
-      if (id && !m.has(id)) m.set(id, { id, nazwa: tr.textContent.replace(/\s+/g, ' ').trim().slice(0, 90) });
+    for (const del of document.querySelectorAll('[onclick*="allegrokurier"]')) {
+      const oc = del.getAttribute('onclick') || '';
+      if (!/disableIntegration\(\s*["']allegrokurier["']/.test(oc)) continue;
+      const id = (oc.match(/allegrokurier["']\s*,\s*["']?(\d+)/) || [])[1];
+      const tr = del.closest('tr'); if (!id || !tr || m.has(id)) continue;
+      const txt = tr.textContent.replace(/\s+/g, ' ').trim();
+      m.set(id, { id, nazwa: (txt.match(/\S.*?AUTOMATIC\s+PRZE-?\s*\d+\s+\S+/i) || [txt])[0].slice(0, 90) });
     }
     return [...m.values()];
   }
@@ -982,20 +985,25 @@
       rysujPanel(); oknoOsobaWynik();
     } finally { osPracuje = false; }
   }
+  // okno ustawień „Wysyłam z Allegro” (ma dane odbioru pickup_* i nadawcy sender_*) – nie zwykła integracja Allegro
+  const oknoWza = () => [...document.querySelectorAll('.modal')].find(m => widoczny(m) && m.querySelector('[id="pickup_company"]') && m.querySelector('[id="sender_person"]') && !widoczny(m.querySelector('[id="gallery_images_sort"]')));
   async function zmienOsobeJednej(it) {
-    const otworz = async () => { await zamknijModal(); W.openIntegrationSettings('allegrokurier', it.id); const ok = await czekajNa(() => document.getElementById('sender_person'), 30000); await czekaj(1500); return ok; };
+    const otworz = async () => {
+      await zamknijModal(); await czekaj(500);
+      W.openIntegrationSettings('allegrokurier', it.id);
+      const m = await czekajNa(oknoWza, 30000); await czekaj(1500);
+      return m && m.querySelector('[id="sender_person"]');
+    };
     let el = await otworz();
-    if (!el) return { stan: 'blad', info: 'nie otworzyły się ustawienia / brak pola osoby kontaktowej' };
+    if (!el) { await zamknijModal(); return { stan: 'blad', info: 'nie otworzyło się okno Wysyłam z Allegro (z polem osoby kontaktowej)' }; }
     const bylo = el.value.trim();
     if (norm(bylo) === norm(OSOBA_NA)) { await zamknijModal(); return { stan: 'juz', info: 'już było ' + OSOBA_NA }; }
     if (norm(bylo) !== norm(OSOBA_Z)) { await zamknijModal(); return { stan: 'inna', info: 'inna osoba: „' + bylo + '” – nie ruszam' }; }
-    const f = el.closest('form');
-    const pane = f && f.closest('.tab-pane, [role=tabpanel]');
-    if (pane && pane.id) { const a = document.querySelector('a[href="#' + pane.id + '"], [data-target="#' + pane.id + '"], [data-bs-target="#' + pane.id + '"]'); if (a) a.click(); await czekaj(700); }
-    el = document.getElementById('sender_person');
+    const pane = el.closest('.tab-pane, [role=tabpanel]');
+    if (pane && pane.id && !widoczny(el)) { const a = oknoWza().querySelector('a[href="#' + pane.id + '"], [data-target="#' + pane.id + '"], [data-bs-target="#' + pane.id + '"]'); if (a) a.click(); await czekaj(700); }
     el.value = OSOBA_NA; zmien(el);
-    const f2 = el.closest('form');
-    const zap = f2 && [...f2.querySelectorAll('button, input[type=submit], input[type=button], a.btn')].find(x => /^\s*Zapisz\s*$/i.test(x.textContent || x.value));
+    const f = el.closest('form');
+    const zap = f && [...f.querySelectorAll('button, input[type=submit], input[type=button], a.btn')].find(x => /^\s*Zapisz\s*$/i.test(x.textContent || x.value));
     if (!zap) { await zamknijModal(); return { stan: 'blad', info: 'brak przycisku Zapisz' }; }
     zap.click(); await czekaj(4000);
     el = await otworz();
