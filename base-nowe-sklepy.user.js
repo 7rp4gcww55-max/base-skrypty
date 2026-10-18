@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.13
+// @version      1.14
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -40,7 +40,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -174,20 +174,24 @@
     const z = zad();
     const btn = (id, t, k) => `<button id="${id}" style="background:${k};color:#fff;border:0;border-radius:6px;padding:5px 8px;font:bold 12px sans-serif;cursor:pointer">${t}</button>`;
     let stan = 'gotowy';
+    const zmOs = czytaj(L_OS, null);
     const ost = !z && czytaj(L_OST, null);
     if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
+      ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
       ${logOtwarty ? '<div style="margin-top:6px;max-height:220px;overflow:auto;background:#0f1720;border-radius:6px;padding:6px;font:11px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap">' + l.slice(-120).reverse().map(x => x.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))).join('\n') + '</div>' : ''}`;
     panel.querySelector('#ns-nowe').onclick = oknoNowe;
     panel.querySelector('#ns-hurt').onclick = oknoHurtownie;
+    panel.querySelector('#ns-osoba').onclick = () => { const w = czytaj(L_OS_W, null); if (w && !czytaj(L_OS, null) && confirm('Pokazać wynik ostatniej zmiany osoby kontaktowej?\n(Anuluj = zacznij nową zmianę)')) return oknoOsobaWynik(); startZmianaOsoby(); };
+    const os = panel.querySelector('#ns-osoba-stop'); if (os) os.onclick = () => { const j = czytaj(L_OS, null); if (j) { j.stop = true; pisz(L_OS, j); log('👤 zatrzymuję zmianę osoby…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
     const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
@@ -911,7 +915,99 @@
     return 'ponów';                                         // po odświeżeniu sprawdzi, czy jest EAN = Wstaw SKU
   };
 
+  // =====================================================================
+  // 👤 ZMIANA OSOBY KONTAKTOWEJ we wszystkich „Wysyłam z Allegro”: Marcel Teschner → TENEMONT SP. Z O.O.
+  // =====================================================================
+  const OSOBA_Z = 'Marcel Teschner', OSOBA_NA = NADAWCA.sender_person;
+  function wszystkieWza() {
+    const m = new Map();
+    for (const tr of document.querySelectorAll('tr')) {
+      const del = tr.querySelector('[onclick*="disableIntegration(\'allegrokurier\'"]'); if (!del) continue;
+      const id = (del.getAttribute('onclick').match(/allegrokurier',\s*'(\d+)'/) || [])[1];
+      if (id && !m.has(id)) m.set(id, { id, nazwa: tr.textContent.replace(/\s+/g, ' ').trim().slice(0, 90) });
+    }
+    return [...m.values()];
+  }
+  async function startZmianaOsoby(lista) {
+    if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
+    if (czytaj(L_OS, null)) return alert('Zmiana osoby już trwa – zobacz panel.');
+    if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsOsobaStart', '1'); log('👤 przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
+    if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
+    await czekaj(1000);
+    lista = lista || wszystkieWza();
+    if (!lista.length) return alert('Nie widzę żadnej integracji „Wysyłam z Allegro” na liście');
+    if (!confirm('Zmienić osobę kontaktową nadawcy w integracjach „Wysyłam z Allegro”: ' + lista.length + '\n\n„' + OSOBA_Z + '” → „' + OSOBA_NA + '”\n\nZmienia TYLKO tam, gdzie jest „' + OSOBA_Z + '”. Inne (np. PRIMKS) zostawia i pokaże w podsumowaniu.\nStrony nie przełączaj w trakcie.')) return;
+    pisz(L_OS, { lista, i: 0, wyniki: [], start: Date.now() });
+    log('👤 START zmiany osoby kontaktowej: ' + lista.length + ' integracji');
+    rysujPanel(); zmianaOsoby();
+  }
+  let osPracuje = false;
+  async function zmianaOsoby() {
+    if (osPracuje) return; osPracuje = true; bezOkienek();
+    try {
+      if (!await czekajNaFunkcje('openIntegrationSettings')) { log('👤 nie wczytała się lista integracji – odśwież stronę'); return; }
+      await czekaj(1500);
+      for (;;) {
+        const j = czytaj(L_OS, null); if (!j) return;
+        if (j.stop || j.i >= j.lista.length) break;
+        const it = j.lista[j.i];
+        let wyn;
+        try { wyn = await zmienOsobeJednej(it); } catch (e) { wyn = { stan: 'blad', info: 'błąd: ' + (e && e.message || e) }; }
+        const j2 = czytaj(L_OS, null); if (!j2) return;
+        j2.wyniki.push({ ...it, ...wyn }); j2.i++; pisz(L_OS, j2);
+        log('👤 ' + (wyn.stan === 'zmienione' ? '✔' : wyn.stan === 'blad' ? '❌' : '·') + ' ' + it.nazwa.slice(0, 50) + ' – ' + (wyn.info || wyn.stan));
+      }
+      const j = czytaj(L_OS, null); if (!j) return;
+      await zamknijModal();
+      pisz(L_OS_W, { ...j, koniec: Date.now() }); localStorage.removeItem(L_OS);
+      const ile = st => j.wyniki.filter(w => w.stan === st).length;
+      log('👤 KONIEC: zmienione ' + ile('zmienione') + ', już było ' + ile('juz') + ', inna osoba ' + ile('inna') + ', błędy ' + ile('blad') + (j.stop ? ' (zatrzymane)' : ''));
+      powiadom('Osoba kontaktowa WzA – koniec', 'zmienione ' + ile('zmienione') + ', błędy ' + ile('blad'), ile('blad') ? 4 : 3);
+      rysujPanel(); oknoOsobaWynik();
+    } finally { osPracuje = false; }
+  }
+  async function zmienOsobeJednej(it) {
+    const otworz = async () => { await zamknijModal(); W.openIntegrationSettings('allegrokurier', it.id); const ok = await czekajNa(() => document.getElementById('sender_person'), 30000); await czekaj(1500); return ok; };
+    let el = await otworz();
+    if (!el) return { stan: 'blad', info: 'nie otworzyły się ustawienia / brak pola osoby kontaktowej' };
+    const bylo = el.value.trim();
+    if (norm(bylo) === norm(OSOBA_NA)) { await zamknijModal(); return { stan: 'juz', info: 'już było ' + OSOBA_NA }; }
+    if (norm(bylo) !== norm(OSOBA_Z)) { await zamknijModal(); return { stan: 'inna', info: 'inna osoba: „' + bylo + '” – nie ruszam' }; }
+    const f = el.closest('form');
+    const pane = f && f.closest('.tab-pane, [role=tabpanel]');
+    if (pane && pane.id) { const a = document.querySelector('a[href="#' + pane.id + '"], [data-target="#' + pane.id + '"], [data-bs-target="#' + pane.id + '"]'); if (a) a.click(); await czekaj(700); }
+    el = document.getElementById('sender_person');
+    el.value = OSOBA_NA; zmien(el);
+    const f2 = el.closest('form');
+    const zap = f2 && [...f2.querySelectorAll('button, input[type=submit], input[type=button], a.btn')].find(x => /^\s*Zapisz\s*$/i.test(x.textContent || x.value));
+    if (!zap) { await zamknijModal(); return { stan: 'blad', info: 'brak przycisku Zapisz' }; }
+    zap.click(); await czekaj(4000);
+    el = await otworz();
+    const teraz = el ? el.value.trim() : '(brak)';
+    await zamknijModal();
+    return norm(teraz) === norm(OSOBA_NA) ? { stan: 'zmienione', info: OSOBA_Z + ' → ' + OSOBA_NA } : { stan: 'blad', info: 'po zapisie jest „' + teraz + '”' };
+  }
+  function oknoOsobaWynik() {
+    const j = czytaj(L_OS_W, null); if (!j) return alert('Brak wyniku');
+    document.querySelectorAll('.ns-os-okno').forEach(x => x.remove());
+    const kol = { zmienione: ['✅', 'zmienione', '#7ee2a8'], juz: ['✔', 'już było', '#90caf9'], inna: ['➖', 'inna osoba – nie ruszone', '#ffb74d'], blad: ['❌', 'błąd', '#ff8a87'] };
+    const ile = st => j.wyniki.filter(w => w.stan === st).length;
+    const reszta = j.lista.length - j.wyniki.length;
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">👤 Osoba kontaktowa „Wysyłam z Allegro” – podsumowanie${j.stop ? ' <span style="color:#ffb74d">(zatrzymane)</span>' : ''}</div>
+      <div style="margin-bottom:10px">${Object.entries(kol).map(([k, [i, t, c]]) => '<span style="color:' + c + ';margin-right:14px">' + i + ' ' + t + ': <b>' + ile(k) + '</b></span>').join('')}${reszta ? '<span style="opacity:.7">· nie sprawdzone: ' + reszta + '</span>' : ''}</div>
+      <div style="max-height:55vh;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Menlo,monospace">
+        ${j.wyniki.slice().sort((a, b) => ['blad', 'inna', 'zmienione', 'juz'].indexOf(a.stan) - ['blad', 'inna', 'zmienione', 'juz'].indexOf(b.stan)).map(w => '<div>' + kol[w.stan][0] + ' ' + esc(w.nazwa) + ' <span style="color:' + kol[w.stan][2] + '">– ' + esc(w.info || '') + '</span></div>').join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        ${ile('blad') || reszta ? `<button id="os-powt" style="${przycisk('#6a1b9a')}">🔁 Powtórz błędy${reszta ? ' + nie sprawdzone' : ''}</button>` : ''}
+        <button id="os-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-os-okno');
+    o.querySelector('#os-zamknij').onclick = () => o.remove();
+    const pw = o.querySelector('#os-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startZmianaOsoby([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, nazwa }) => ({ id, nazwa })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
   // ---------- start ----------
   rysujPanel();
+  if (czytaj(L_OS, null) && naStronie('/list_integrations.php')) setTimeout(zmianaOsoby, 2500);
+  else if (localStorage.getItem('nsOsobaStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsOsobaStart'); setTimeout(() => startZmianaOsoby(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
