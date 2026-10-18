@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.10
+// @version      1.11
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -81,28 +81,65 @@
     for (const x of historia()) if (nn(x.hurtownia) === nn(klucz) && x.mnoznik && x.zdjecie && !pomin.includes(nn(x.sklep))) z.push({ sklep: x.sklep, m: +x.mnoznik, z: +x.zdjecie });
     return z;
   }
-  function zaproponuj(klucz, sklepy) {
+  // linie: "Sklep [PRZE-nr|nr] [mnożnik] [zdjęcie]" – np. "ProfiPrzemysl 1 1.45 3", "Sklep 1.45 3", "Sklep ×1.45/3", "Sklep" (samo konto)
+  function parsujSklepy(txt) {
+    const out = [];
+    for (const linia of String(txt || '').split(/\n+/)) {
+      const tok = linia.trim().split(/[\s;\t|]+/).filter(Boolean);
+      if (!tok.length) continue;
+      const nazwy = [], ints = [], r = {};
+      for (const t of tok) {
+        let m;
+        if ((m = t.match(/^PRZE-?(\d+)$/i))) r.nr = +m[1];
+        else if ((m = t.match(/^[x×*]?(\d+(?:[.,]\d+)?)\/(\d+)$/i))) { r.mnoznik = +m[1].replace(',', '.'); r.zdjecie = +m[2]; }
+        else if ((m = t.match(/^[x×*](\d+(?:[.,]\d+)?)$/i)) || (m = t.match(/^(\d+[.,]\d+)$/))) r.mnoznik = +m[1].replace(',', '.');
+        else if ((m = t.match(/^(?:zdj\.?|z)(\d+)$/i))) r.zdjecie = +m[1];
+        else if (/^\d+$/.test(t)) ints.push(+t);
+        else nazwy.push(t);
+      }
+      if (!nazwy.length) continue;
+      if (r.zdjecie == null && ints.length) r.zdjecie = ints.pop();
+      if (r.nr == null && ints.length) r.nr = ints.pop();
+      const nazwa = nazwy.join(' ');
+      if (r.mnoznik == null && r.zdjecie == null && r.nr == null && nazwa.includes(',')) { nazwa.split(',').map(x => x.trim()).filter(Boolean).forEach(x => out.push({ sklep: x })); continue; }
+      out.push({ sklep: nazwa, ...r });
+    }
+    return out;
+  }
+  // wpisane: { nn(sklep): { nr, mnoznik, zdjecie } } – to, co wpisałeś, zostaje; reszta dobierana tak, żeby nie kolidowała
+  function zaproponuj(klucz, sklepy, wpisane = {}) {
     const h = hurtownie()[klucz] || {};
     const maxZ = +h.maxZdjecie || 6, maxM = +h.maxMnoznik || 1.99, minM = +h.minMnoznik || 1.05;
     const hist = historia();
     const uzyte = zajete(klucz, sklepy.map(nn));
     let nr = hist.filter(x => nn(x.hurtownia) === nn(klucz)).reduce((m, x) => Math.max(m, +x.nr || 0), 0);
+    for (const s of sklepy) { const w = wpisane[nn(s)]; if (w && +w.nr > nr) nr = +w.nr; }
+    const stale = {};
+    for (const s of sklepy) {
+      const w = wpisane[nn(s)] || {}, jest = hist.find(x => nn(x.sklep) === nn(s) && nn(x.hurtownia) === nn(klucz));
+      if (w.mnoznik != null && w.zdjecie != null) stale[nn(s)] = { m: +w.mnoznik, z: +w.zdjecie, wpisane: true };
+      else if (w.mnoznik == null && w.zdjecie == null && jest && jest.mnoznik && jest.zdjecie) stale[nn(s)] = { m: +jest.mnoznik, z: +jest.zdjecie, zHistorii: true, czas: jest.czas };
+    }
+    for (const k in stale) uzyte.push({ m: stale[k].m, z: stale[k].z });
     return sklepy.map(s => {
-      const jest = hist.find(x => nn(x.sklep) === nn(s) && nn(x.hurtownia) === nn(klucz));
-      if (jest && jest.mnoznik && jest.zdjecie) { uzyte.push({ m: +jest.mnoznik, z: +jest.zdjecie }); return { sklep: s, nr: +jest.nr, mnoznik: (+jest.mnoznik).toFixed(2), zdjecie: +jest.zdjecie, czas: jest.czas || h.czasWysylki || '24h', zHistorii: true }; }
+      const w = wpisane[nn(s)] || {}, jest = hist.find(x => nn(x.sklep) === nn(s) && nn(x.hurtownia) === nn(klucz)), st = stale[nn(s)];
+      const numer = w.nr != null ? +w.nr : jest && +jest.nr ? +jest.nr : ++nr;
+      if (st) return { sklep: s, nr: numer, mnoznik: st.m.toFixed(2), zdjecie: st.z, czas: (st.zHistorii && st.czas) || h.czasWysylki || '24h', zHistorii: !!st.zHistorii, wpisane: !!st.wpisane };
       let best = null;
-      for (let m = Math.round(minM * 100); m <= Math.round(maxM * 100); m++) {
+      const mOd = w.mnoznik != null ? Math.round(+w.mnoznik * 100) : Math.round(minM * 100), mDo = w.mnoznik != null ? mOd : Math.round(maxM * 100);
+      for (let m = mOd; m <= mDo; m++) {
         const mm = m / 100, odl = uzyte.length ? Math.min(...uzyte.map(u => Math.abs(u.m - mm))) : 9;
-        if (odl < 0.06 - 1e-9) continue;
-        for (let z = 2; z <= maxZ; z++) {
-          if (uzyte.some(u => u.z === z && Math.abs(u.m - mm) < 0.3 - 1e-9)) continue;
-          const ocena = Math.min(odl, 0.2) * 10 - uzyte.filter(u => u.z === z).length - Math.abs(mm - (minM + maxM) / 2) * 0.5;
+        if (w.mnoznik == null && odl < 0.06 - 1e-9) continue;
+        for (let z = w.zdjecie != null ? +w.zdjecie : 2; z <= (w.zdjecie != null ? +w.zdjecie : maxZ); z++) {
+          if (w.zdjecie == null && w.mnoznik == null && uzyte.some(u => u.z === z && Math.abs(u.m - mm) < 0.3 - 1e-9)) continue;
+          const kol = uzyte.some(u => u.z === z && Math.abs(u.m - mm) < 0.3 - 1e-9) ? 5 : 0;
+          const ocena = Math.min(odl, 0.2) * 10 - uzyte.filter(u => u.z === z).length - Math.abs(mm - (minM + maxM) / 2) * 0.5 - kol;
           if (!best || ocena > best.ocena) best = { m: mm, z, ocena };
         }
       }
-      const w = { sklep: s, nr: jest ? +jest.nr : ++nr, czas: h.czasWysylki || '24h' };
-      if (best) { uzyte.push({ m: best.m, z: best.z }); w.mnoznik = best.m.toFixed(2); w.zdjecie = best.z; } else { w.mnoznik = ''; w.zdjecie = ''; }
-      return w;
+      const r = { sklep: s, nr: numer, czas: h.czasWysylki || '24h', wpisane: w.mnoznik != null || w.zdjecie != null };
+      if (best) { uzyte.push({ m: best.m, z: best.z }); r.mnoznik = best.m.toFixed(2); r.zdjecie = best.z; } else { r.mnoznik = ''; r.zdjecie = ''; }
+      return r;
     });
   }
   function sprawdzZasady(klucz, w) {
@@ -212,7 +249,9 @@
           <div style="margin-top:10px"><b>Co zrobić</b> <a href="#" id="n-wsz" style="color:#90caf9;font-size:12px">przeróbka – wszystko</a> · <a href="#" id="n-fin" style="color:#90caf9;font-size:12px">przygotuj do finalnego</a> · <a href="#" id="n-nic" style="color:#90caf9;font-size:12px">nic</a>
             ${WYBOR.map(([k, t]) => `<label style="display:block;margin-top:3px;max-width:330px${FINALNE.includes(k) ? ';color:#90caf9' : ''}"><input type="checkbox" class="n-krok" value="${k}" ${FINALNE.includes(k) ? '' : 'checked'}> ${k === 'warunki' ? 'Cenniki dostaw i warunki:' : t}</label>${k === 'warunki' ? '<div style="margin-left:22px">' + WARUNKI.map(([w, wt]) => `<label style="display:block;font-size:12px"><input type="checkbox" class="n-war" value="${w}" checked> ${wt}</label>`).join('') + '</div>' : ''}`).join('')}</div></div>
         <div>Sklepy tej hurtowni (zaznacz)<br><div id="n-ist" style="${pole};width:240px;height:150px;overflow:auto"></div>
-          <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><textarea id="n-s" style="${pole};width:240px;height:90px"></textarea></div></div>
+          <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><span style="font-size:11px;opacity:.7">można od razu dać swoje: Sklep mnożnik zdjęcie</span><br><textarea id="n-s" style="${pole};width:240px;height:90px" placeholder="NowySklep&#10;InnySklep 1.45 3"></textarea></div>
+          <div style="margin-top:8px">Wcześniej zrobione sklepy (do bazy)<br><span style="font-size:11px;opacity:.7">Sklep [nr] mnożnik zdjęcie – jedno w linii</span><br><textarea id="n-stare" style="${pole};width:240px;height:70px" placeholder="ProfiPrzemysl 1 1.45 3&#10;StarySklep 1.80 4"></textarea>
+            <br><button id="n-stare-zap" style="${przycisk('#6a1b9a')};margin-top:4px">💾 Dopisz do bazy</button></div></div>
         <div style="flex:1;min-width:260px"><div id="n-info" style="opacity:.85"></div>
           <button id="n-prop" style="${przycisk('#1565c0')};margin-top:8px">① Zaproponuj nr, zdjęcia i mnożniki</button></div>
       </div>
@@ -230,7 +269,7 @@
     };
     const istniejace = () => {
       const lista = historia().filter(x => nn(x.hurtownia) === nn(hSel.value)).sort((a, b) => (+a.nr || 0) - (+b.nr || 0));
-      o.querySelector('#n-ist').innerHTML = lista.length ? lista.map(x => `<label style="display:block"><input type="checkbox" class="n-ist" value="${esc(x.sklep)}"> PRZE-${x.nr} ${esc(x.sklep)}${x.mnoznik ? ' <span style="opacity:.6">×' + (+x.mnoznik).toFixed(2) + '/' + x.zdjecie + '</span>' : ''}</label>`).join('') : '<span style="opacity:.6">brak</span>';
+      o.querySelector('#n-ist').innerHTML = lista.length ? lista.map(x => `<label style="display:block"><input type="checkbox" class="n-ist" value="${esc(x.sklep)}"> ${+x.nr ? 'PRZE-' + x.nr : '(bez nr)'} ${esc(x.sklep)}${x.mnoznik ? ' <span style="opacity:.6">×' + (+x.mnoznik).toFixed(2) + '/' + x.zdjecie + '</span>' : ''}</label>`).join('') : '<span style="opacity:.6">brak</span>';
     };
     hSel.onchange = () => { info(); istniejace(); }; info(); istniejace();
     o.querySelector('#n-wsz').onclick = e => { e.preventDefault(); o.querySelectorAll('.n-krok').forEach(c => c.checked = !FINALNE.includes(c.value)); };
@@ -238,7 +277,7 @@
     o.querySelector('#n-nic').onclick = e => { e.preventDefault(); o.querySelectorAll('.n-krok').forEach(c => c.checked = false); };
     const rysuj = () => {
       o.querySelector('#n-tab').innerHTML = `<table style="width:100%;border-collapse:collapse"><tr style="opacity:.7;text-align:left"><th>Sklep</th><th>Nr</th><th>Nazwa integracji / katalogu</th><th>Zdjęcie</th><th>Mnożnik</th><th>Czas wysyłki</th></tr>
-        ${wiersze.map((w, i) => `<tr><td><b>${esc(w.sklep)}</b>${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : ''}</td>
+        ${wiersze.map((w, i) => `<tr><td><b>${esc(w.sklep)}</b>${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : w.wpisane ? ' <span style="color:#ce93d8">(wpisane)</span>' : ''}</td>
           <td><input data-i="${i}" data-p="nr" value="${w.nr}" style="${pole};width:55px"></td>
           <td style="opacity:.8">${esc(nazwaWza(hSel.value, w))}</td>
           <td><input data-i="${i}" data-p="zdjecie" value="${w.zdjecie}" style="${pole};width:55px"></td>
@@ -250,14 +289,33 @@
       o.querySelector('#n-start').style.display = wiersze.length ? '' : 'none';
     };
     o.querySelector('#n-prop').onclick = () => {
-      const s = [...new Set([...[...o.querySelectorAll('.n-ist:checked')].map(c => c.value), ...o.querySelector('#n-s').value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean)])];
+      const nowe = parsujSklepy(o.querySelector('#n-s').value), wpisane = {};
+      for (const x of nowe) { const { sklep, ...r } = x; if (Object.keys(r).length) wpisane[nn(sklep)] = r; }
+      const s = [...new Map([...[...o.querySelectorAll('.n-ist:checked')].map(c => c.value), ...nowe.map(x => x.sklep)].map(x => [nn(x), x])).values()];
       if (!s.length) return alert('Zaznacz sklepy albo wpisz nowe konta Allegro');
-      wiersze = zaproponuj(hSel.value, s);
+      wiersze = zaproponuj(hSel.value, s, wpisane);
       const cz = o.querySelector('#n-czas').value; wiersze.forEach(w => { if (!w.zHistorii) w.czas = cz; });
       rysuj();
     };
     o.querySelector('#n-czas-box').addEventListener('change', e => { if (e.target.id === 'n-czas') { wiersze.forEach(w => w.czas = e.target.value); if (wiersze.length) rysuj(); } });
     o.querySelector('#n-anuluj').onclick = () => o.remove();
+    o.querySelector('#n-stare-zap').onclick = () => {
+      const k = hSel.value, lista = parsujSklepy(o.querySelector('#n-stare').value);
+      if (!lista.length) return alert('Wpisz sklepy: Sklep [nr] mnożnik zdjęcie');
+      const zle = lista.filter(x => !(x.mnoznik > 0) || !(x.zdjecie > 0));
+      if (zle.length) return alert('Brak mnożnika albo zdjęcia przy: ' + zle.map(x => x.sklep).join(', ') + '\nFormat: Sklep [nr] mnożnik zdjęcie, np. ProfiPrzemysl 1 1.45 3');
+      if (!confirm('Dopisać do bazy (' + k + '):\n' + lista.map(x => (x.nr ? 'PRZE-' + x.nr + ' ' : '') + x.sklep + '  ×' + x.mnoznik.toFixed(2) + '  zdj.' + x.zdjecie).join('\n'))) return;
+      const hist = historia();
+      for (const x of lista) {
+        const i = hist.findIndex(y => nn(y.sklep) === nn(x.sklep));
+        const e = { sklep: x.sklep, hurtownia: k, mnoznik: x.mnoznik, zdjecie: x.zdjecie, ...(x.nr ? { nr: x.nr } : {}) };
+        if (i >= 0) hist[i] = { ...hist[i], ...e }; else hist.push({ nr: null, ...e });
+      }
+      pisz(L_HIST, hist);
+      o.querySelector('#n-stare').value = '';
+      info(); istniejace();
+      if (wiersze.length) { wiersze = zaproponuj(k, wiersze.map(w => w.sklep), Object.fromEntries(wiersze.filter(w => w.wpisane).map(w => [nn(w.sklep), { nr: w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie }]))); rysuj(); }
+    };
     o.querySelector('#n-start').onclick = () => {
       const k = hSel.value, h = H[k], br = brakiHurtowni(h), b = sprawdzZasady(k, wiersze);
       if (br.length) return alert('Uzupełnij dane hurtowni ' + k + ': ' + br.join(', '));
