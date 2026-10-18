@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.14
+// @version      1.15
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -650,6 +650,12 @@
       { nazwa: 'Stany', tab: 'account_modal_sync_quantity', kotwica: 'sync_quantity_4', radio: ['sync_quantity_4'], wybory: { if_zero: 'Zakończ ofertę', if_lower: 'Zmniejsz ilość dostępną w ofercie do wysokości stanu magazynowego', if_bigger: 'Zwiększ ilość dostępną w ofercie do wysokości stanu magazynowego' }, pola: { end_limit_day: '4000', max_quantity: '999999' } }
     ];
   }
+  const sensowne = el => [...el.options].filter(o => o.value !== '' && !/^(brak |nie wybrano|--|wybierz)/i.test(o.textContent.trim()));
+  async function czekajNaOpcje(sk, t = 12000) {   // listy warunków/producentów Base dociąga po otwarciu – poczekaj, aż się wypełnią
+    const pane = document.getElementById(sk.tab); if (!pane) return;
+    const sel = Object.keys(sk.wybory || {}).map(id => pane.querySelector('[id="' + id + '"]')).filter(Boolean);
+    await czekajNa(() => sel.every(el => sensowne(el).length), t);
+  }
   function sekcjaWStronie(sk, sprawdz) {
     const pane = document.getElementById(sk.tab); if (!pane) return { bledy: ['brak zakładki ' + sk.tab], zle: [] };
     const q = id => pane.querySelector('[id="' + id + '"]');
@@ -657,7 +663,7 @@
     for (const id of (sk.radio || [])) { const el = q(id); if (!el) { bledy.push('brak ' + id); continue; } if (sprawdz) { if (!el.checked) zle.push(id); } else if (!el.checked) { el.click(); zmien(el); } }
     for (const [id, w] of Object.entries(sk.wybory || {})) {
       const el = q(id); if (!el) { bledy.push('brak ' + id); continue; }
-      const o = opcja(el, w); if (!o) { bledy.push(id + ': brak opcji „' + w + '”'); continue; }
+      const o = opcja(el, w); if (!o) { const jest = sensowne(el).map(x => x.textContent.trim()); bledy.push(id + ': brak opcji „' + w + '”' + (jest.length ? ' (są: ' + jest.slice(0, 4).join(' | ') + (jest.length > 4 ? ' …+' + (jest.length - 4) : '') + ')' : ' (lista pusta)')); continue; }
       if (sprawdz) { if (el.value !== o.value) zle.push(id + '=„' + ((el.selectedOptions[0] || {}).textContent || '') + '”'); } else if (el.value !== o.value) ustawSelect(el, o.value);
     }
     for (const [id, v] of Object.entries(sk.pola || {})) {
@@ -701,10 +707,11 @@
   async function odswiezZAllegro(przycisk, sklep) {
     const b = await czekajNa(() => [...document.querySelectorAll('button')].find(x => x.textContent.includes(przycisk) && widoczny(x)), 30000);
     if (!b) return 'brak przycisku „' + przycisk + '”';
-    b.click(); await czekaj(800);
-    const a = [...(b.parentElement || document).querySelectorAll('.dropdown-menu a')].find(a => norm(a.textContent) === norm(sklep));
-    if (!a) { document.body.click(); return 'brak konta ' + sklep + ' na liście'; }
-    a.click(); await czekaj(7000);
+    b.click();
+    const szukaj = () => { const l = [...(b.parentElement || document).querySelectorAll('.dropdown-menu a')]; return l.find(a => norm(a.textContent) === norm(sklep)) || l.find(a => nn(a.textContent) === nn(sklep)) || l.find(a => nn(a.textContent).includes(nn(sklep))); };
+    const a = await czekajNa(szukaj, 6000);
+    if (!a) { document.body.click(); return 'brak konta ' + sklep + ' na liście (' + przycisk + ')'; }
+    a.click(); await czekaj(9000);
     return 'ok';
   }
   KROK.warunki = async (z, s) => {
@@ -724,7 +731,7 @@
     const otworz = async () => { await zamknijModal(); W.openIntegrationSettings('allegro', a.id); const ok = await czekajNa(() => document.getElementById('gallery_images_sort'), 30000); await czekaj(2500); return ok; };
     const pokaz = async () => { const l = document.querySelector('a[href="#' + sk.tab + '"]'); if (l) l.click(); await czekajNa(() => document.getElementById(sk.tab)?.querySelector('[id="' + sk.kotwica + '"]'), 30000); await czekaj(1200); };
     if (!await otworz()) return 'nie otworzyły się ustawienia konta Allegro';
-    await pokaz();
+    await pokaz(); await czekajNaOpcje(sk);
     const r = sekcjaWStronie(sk, false);
     if (r.bledy.length) log('   ⚠ ' + r.bledy.join('; '));
     const b = document.getElementById(sk.tab)?.querySelector('.btn_form_save'); if (!b) return 'brak Zapisz';
@@ -733,8 +740,14 @@
     await pokaz();
     const zle = sekcjaWStronie(sk, true).zle; await zamknijModal();
     const brak = r.bledy.filter(x => /brak opcji/.test(x));
+    if (brak.length && s.proby.warunki < 2) {           // czegoś nie ma na liście → jeszcze raz pobierz z Allegro i spróbuj ponownie
+      if (war.includes('cennik') || brak.some(x => /return_policies|warranties/.test(x))) s.odswC = false;
+      if (war.includes('producent')) s.odswP = false;
+      log('   ↻ brakuje opcji – odświeżam z Allegro i próbuję jeszcze raz: ' + brak.join('; '));
+      return 'ponów';
+    }
     if (zle.length) return s.proby.warunki < 2 ? 'ponów' : 'po zapisie nie zgadza się: ' + zle.join('; ');
-    return brak.length ? 'nie ma w Base: ' + brak.join('; ') : 'ok';
+    return brak.length ? 'nie ma w Base (po odświeżeniu z Allegro): ' + brak.join('; ') + ' – sprawdź, czy to konto ma te warunki/producenta w Allegro' : 'ok';
   };
 
   // 4) katalog
@@ -747,7 +760,10 @@
     if (pager && pager.value !== '100000') { const przed = wierszeKat().length; ustawSelect(pager, '100000'); await czekajNa(() => wierszeKat().length > przed, 15000); await czekaj(1500); }
     const jest = znajdzKat(nazwa);
     if (jest) { s.katId = jest.id; return 'ok'; }
-    if (z.tylkoZnajdzKatalog) return 'nie ma katalogu „' + nazwa + '” (zaznacz też „Katalog”, żeby go założyć)';
+    // ten sam sklep tej hurtowni pod innym nr PRZE → bierz istniejący, nie dubluj
+    const podobny = wierszeKat().find(w => [...w.tr.cells].some(td => { const t = norm(td.innerText); return t.startsWith(norm(z.hurtownia + ' automatic prze')) && nn(t).endsWith(nn(s.sklep)); }));
+    if (podobny) { s.katId = podobny.id; log('   katalog pod innym nr: „' + [...podobny.tr.cells].map(td => td.innerText.trim()).find(t => nn(t).endsWith(nn(s.sklep))) + '” – biorę go'); return 'ok'; }
+    if (z.tylkoZnajdzKatalog) log('   nie ma katalogu „' + nazwa + '” – zakładam');
     if (s.proby.katalog > 1) return 'po zapisie nie widzę katalogu „' + nazwa + '”';
     W.addNewInventory();
     const m = await czekajNa(() => { const x = document.getElementById('modal_inventory_inventory'); return widoczny(x) && x.querySelector('#name') ? x : null; }, 30000);
