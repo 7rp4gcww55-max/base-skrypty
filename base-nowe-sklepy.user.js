@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.17
+// @version      1.18
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -864,9 +864,11 @@
     await czekajNa(() => [...document.querySelectorAll('button')].some(b => /Dodaj parametr/.test(b.textContent) && widoczny(b)), 60000);
     await czekaj(2000);
     const stan = () => { const r = [...document.querySelectorAll('tr.paramMappingRow')].find(r => (r.querySelector('td[id^="cellServiceParam_"]')?.textContent || '').trim() === PARAM_WAGA); if (!r) return null; const id = r.id.replace('row_', ''); return { typ: document.getElementById('initialValueActionType_' + id)?.value, m: document.getElementById('initialMultiplierValue_' + id)?.value }; };
+    const liczba = v => parseFloat(String(v == null ? '' : v).replace(',', '.'));
     const jest = stan();
-    if (jest && jest.typ === '4' && Math.abs(parseFloat(jest.m) - parseFloat(s.mnoznik)) < 0.001) return 'ok';
-    if (jest) return 'jest już inna reguła wagi (×' + jest.m + ') – popraw ręcznie';
+    if (jest) log('   mapowanie wagi w katalogu ' + s.katId + ': reguła ' + jest.typ + ', mnożnik w Base ×' + jest.m + ' (ma być ×' + s.mnoznik + ')');
+    if (jest && jest.typ === '4' && Math.abs(liczba(jest.m) - liczba(s.mnoznik)) < 0.001) return 'ok';
+    if (jest) return 'jest już inna reguła wagi (×' + jest.m + ', ma być ×' + s.mnoznik + ') – popraw ręcznie';
     if (s.proby.waga > 2) return 'nie zapisało się';
     [...document.querySelectorAll('button')].find(b => /Dodaj parametr/.test(b.textContent) && widoczny(b)).click();
     const e = await czekajNa(() => document.getElementById('row_-1'), 8000); if (!e) return 'brak edytora';
