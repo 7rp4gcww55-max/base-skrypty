@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.11
+// @version      1.12
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -248,7 +248,9 @@
           <div style="margin-top:8px">Czas wysyłki (dla wszystkich)<br><span id="n-czas-box"></span></div>
           <div style="margin-top:10px"><b>Co zrobić</b> <a href="#" id="n-wsz" style="color:#90caf9;font-size:12px">przeróbka – wszystko</a> · <a href="#" id="n-fin" style="color:#90caf9;font-size:12px">przygotuj do finalnego</a> · <a href="#" id="n-nic" style="color:#90caf9;font-size:12px">nic</a>
             ${WYBOR.map(([k, t]) => `<label style="display:block;margin-top:3px;max-width:330px${FINALNE.includes(k) ? ';color:#90caf9' : ''}"><input type="checkbox" class="n-krok" value="${k}" ${FINALNE.includes(k) ? '' : 'checked'}> ${k === 'warunki' ? 'Cenniki dostaw i warunki:' : t}</label>${k === 'warunki' ? '<div style="margin-left:22px">' + WARUNKI.map(([w, wt]) => `<label style="display:block;font-size:12px"><input type="checkbox" class="n-war" value="${w}" checked> ${wt}</label>`).join('') + '</div>' : ''}`).join('')}</div></div>
-        <div>Sklepy tej hurtowni (zaznacz)<br><div id="n-ist" style="${pole};width:240px;height:150px;overflow:auto"></div>
+        <div>Sklepy tej hurtowni (zaznacz) <a href="#" id="n-ist-wsz" style="color:#90caf9;font-size:12px">wszystkie</a><br><div id="n-ist" style="${pole};width:240px;height:150px;overflow:auto"></div>
+          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><button id="n-ist-usun" style="${przycisk('#b71c1c')};padding:3px 8px;font-size:12px">🗑 Usuń zaznaczone</button>
+            <button id="n-ist-przen" style="${przycisk('#455a64')};padding:3px 8px;font-size:12px">↪ Przenieś do…</button></div>
           <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><span style="font-size:11px;opacity:.7">można od razu dać swoje: Sklep mnożnik zdjęcie</span><br><textarea id="n-s" style="${pole};width:240px;height:90px" placeholder="NowySklep&#10;InnySklep 1.45 3"></textarea></div>
           <div style="margin-top:8px">Wcześniej zrobione sklepy (do bazy)<br><span style="font-size:11px;opacity:.7">Sklep [nr] mnożnik zdjęcie – jedno w linii</span><br><textarea id="n-stare" style="${pole};width:240px;height:70px" placeholder="ProfiPrzemysl 1 1.45 3&#10;StarySklep 1.80 4"></textarea>
             <br><button id="n-stare-zap" style="${przycisk('#6a1b9a')};margin-top:4px">💾 Dopisz do bazy</button></div></div>
@@ -299,6 +301,31 @@
     };
     o.querySelector('#n-czas-box').addEventListener('change', e => { if (e.target.id === 'n-czas') { wiersze.forEach(w => w.czas = e.target.value); if (wiersze.length) rysuj(); } });
     o.querySelector('#n-anuluj').onclick = () => o.remove();
+    const zaznaczone = () => [...o.querySelectorAll('.n-ist:checked')].map(c => c.value);
+    o.querySelector('#n-ist-wsz').onclick = e => { e.preventDefault(); const c = [...o.querySelectorAll('.n-ist')], wsz = c.every(x => x.checked); c.forEach(x => x.checked = !wsz); };
+    const poZmianie = () => { info(); istniejace(); if (wiersze.length) { const zost = new Set(historia().filter(x => nn(x.hurtownia) === nn(hSel.value)).map(x => nn(x.sklep))); wiersze = wiersze.filter(w => !w.zHistorii || zost.has(nn(w.sklep))); rysuj(); } };
+    o.querySelector('#n-ist-usun').onclick = () => {
+      const z = zaznaczone(), k = hSel.value;
+      if (!z.length) return alert('Zaznacz sklepy na liście „Sklepy tej hurtowni”');
+      if (!confirm('Usunąć z bazy (' + k + '):\n' + z.join('\n') + '\n\nUsuwa tylko wpis w skrypcie (nr, mnożnik, zdjęcie) – w Base nic nie rusza.')) return;
+      const zs = new Set(z.map(nn));
+      pisz(L_HIST, historia().filter(x => !(nn(x.hurtownia) === nn(k) && zs.has(nn(x.sklep)))));
+      poZmianie();
+    };
+    o.querySelector('#n-ist-przen').onclick = () => {
+      const z = zaznaczone(), k = hSel.value;
+      if (!z.length) return alert('Zaznacz sklepy na liście „Sklepy tej hurtowni”');
+      const inne = Object.keys(H).filter(x => x !== k);
+      const odp = (prompt('Przenieść ' + z.length + ' sklep(y) z ' + k + ' do hurtowni:\n' + inne.map((x, i) => (i + 1) + ') ' + x).join('\n') + '\n\nWpisz numer albo nazwę:') || '').trim();
+      if (!odp) return;
+      const cel = /^\d+$/.test(odp) ? inne[+odp - 1] : inne.find(x => nn(x) === nn(odp));
+      if (!cel) return alert('Nie ma takiej hurtowni: ' + odp);
+      const zs = new Set(z.map(nn));
+      const hist = historia().map(x => nn(x.hurtownia) === nn(k) && zs.has(nn(x.sklep)) ? { ...x, hurtownia: cel } : x);
+      pisz(L_HIST, hist);
+      poZmianie();
+      alert('Przeniesione do ' + cel + ': ' + z.join(', ') + (z.length ? '\nNr PRZE zostały stare – popraw, jeśli trzeba (wpisz ponownie w „Wcześniej zrobione” w ' + cel + ').' : ''));
+    };
     o.querySelector('#n-stare-zap').onclick = () => {
       const k = hSel.value, lista = parsujSklepy(o.querySelector('#n-stare').value);
       if (!lista.length) return alert('Wpisz sklepy: Sklep [nr] mnożnik zdjęcie');
