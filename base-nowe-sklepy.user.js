@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.12
+// @version      1.13
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -40,7 +40,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -174,20 +174,25 @@
     const z = zad();
     const btn = (id, t, k) => `<button id="${id}" style="background:${k};color:#fff;border:0;border-radius:6px;padding:5px 8px;font:bold 12px sans-serif;cursor:pointer">${t}</button>`;
     let stan = 'gotowy';
+    const ost = !z && czytaj(L_OST, null);
+    if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
       ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
+      ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
       ${logOtwarty ? '<div style="margin-top:6px;max-height:220px;overflow:auto;background:#0f1720;border-radius:6px;padding:6px;font:11px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap">' + l.slice(-120).reverse().map(x => x.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))).join('\n') + '</div>' : ''}`;
     panel.querySelector('#ns-nowe').onclick = oknoNowe;
     panel.querySelector('#ns-hurt').onclick = oknoHurtownie;
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
+    const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
+    const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
     const p = panel.querySelector('#ns-pauza'); if (p) p.onclick = () => { const z = zad(); z.pauza = !z.pauza; zapiszZad(z); rysujPanel(); if (!z.pauza) setTimeout(() => location.reload(), 300); };
-    const s = panel.querySelector('#ns-stop'); if (s) s.onclick = () => { if (confirm('ZATRZYMAĆ bota? (to, co zrobione, zostaje w Base)')) { localStorage.removeItem(L_Z); log('⏹ zatrzymane ręcznie'); setTimeout(() => location.reload(), 200); } };
+    const s = panel.querySelector('#ns-stop'); if (s) s.onclick = () => { if (confirm('ZATRZYMAĆ bota? (to, co zrobione, zostaje w Base)')) { const zz = zad(); if (zz) pisz(L_OST, { ...zz, koniec: Date.now(), zatrzymane: true }); localStorage.removeItem(L_Z); log('⏹ zatrzymane ręcznie'); setTimeout(() => location.reload(), 200); } };
     if (panel.style.top && panel.style.top !== 'auto') requestAnimationFrame(() => ustawPozycje(parseFloat(panel.style.left) || 0, parseFloat(panel.style.top) || 0));
   }
 
@@ -238,6 +243,64 @@
   const CZASY = [['24h', '24 godziny'], ['48h', '48 godzin'], ['3d', '3 dni'], ['4d', '4 dni'], ['5d', '5 dni'], ['7d', '7 dni']];
   const selCzas = (v, attr = '') => { const o = CZASY.some(c => c[0] === v) ? CZASY : [...CZASY, [v, v]]; return `<select ${attr} style="${pole}">${o.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`; };
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---------- podsumowanie / powtórka ----------
+  const stanKroku = (s, k) => s.ok[k] === true ? 'ok' : s.ok[k] ? 'blad' : 'brak';
+  function wynik(z) {
+    const K = krokiZad(z); let ok = 0, zle = 0;
+    for (const s of z.sklepy) for (const k of K) { if (stanKroku(s, k) === 'ok') ok++; else zle++; }
+    return { ok, zle, wszystkie: z.sklepy.length * K.length, K };
+  }
+  function powtorz(z, tryb, sklepy) {
+    if (!z) return alert('Brak ostatniego zadania');
+    if (zad() && !confirm('Jest zadanie w toku. Zastąpić je powtórką?')) return;
+    const K = krokiZad(z), wyb = sklepy ? new Set(sklepy.map(nn)) : null;
+    const lista = z.sklepy.filter(s => (!wyb || wyb.has(nn(s.sklep))) && (tryb === 'wszystko' || K.some(k => stanKroku(s, k) !== 'ok')));
+    if (!lista.length) return alert('Nie ma czego powtarzać – wszystko przeszło ✔');
+    const nowe = lista.map(s => {
+      const ok = {}; if (tryb !== 'wszystko') for (const k of K) if (s.ok[k] === true) ok[k] = true;
+      const war = z.warunki || [];
+      return { ...s, ok, proby: {}, odswC: ok.warunki ? s.odswC : !war.includes('cennik'), odswP: ok.warunki ? s.odswP : !war.includes('producent') };
+    });
+    const opis = nowe.map(s => s.sklep + ': ' + K.filter(k => !s.ok[k]).map(k => OPIS[k]).join(', ')).join('\n');
+    if (!confirm('Powtórzyć (' + z.hurtownia + ')?\n\n' + opis)) return;
+    document.querySelectorAll('.ns-pods-okno').forEach(x => x.remove());
+    pisz(L_LOG, []);
+    zapiszZad({ hurtownia: z.hurtownia, kroki: z.kroki, warunki: z.warunki, tylkoZnajdzKatalog: z.tylkoZnajdzKatalog, start: Date.now(), powtorka: true, sklepy: nowe });
+    log('🔁 POWTÓRKA ' + z.hurtownia + ' (' + (tryb === 'wszystko' ? 'wszystko' : 'nieudane') + '): ' + nowe.map(s => s.sklep).join(', '));
+    powiadom('Powtórka nowych sklepów', z.hurtownia + ': ' + nowe.map(s => s.sklep).join(', '));
+    rysujPanel(); setTimeout(silnik, 500);
+  }
+  function oknoPodsumowanie() {
+    const z = czytaj(L_OST, null); if (!z) return alert('Brak podsumowania – żadne zadanie jeszcze się nie skończyło');
+    document.querySelectorAll('.ns-pods-okno').forEach(x => x.remove());
+    const r = wynik(z), K = r.K;
+    const czas = z.start && z.koniec ? Math.round((z.koniec - z.start) / 60000) + ' min' : '';
+    const ikona = (s, k) => { const st = stanKroku(s, k); return st === 'ok' ? '✅' : st === 'blad' ? '<span title="' + esc(s.ok[k]) + '">❌</span>' : '<span title="nie zrobione (wcześniejszy krok nie przeszedł albo zadanie przerwane)">⏸</span>'; };
+    const bledy = z.sklepy.flatMap(s => K.filter(k => stanKroku(s, k) !== 'ok').map(k => ({ sklep: s.sklep, krok: OPIS[k], powod: stanKroku(s, k) === 'blad' ? s.ok[k] : 'nie zrobione (wcześniejszy krok nie przeszedł albo zadanie przerwane)' })));
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">📋 Podsumowanie – ${esc(z.hurtownia)}${z.zatrzymane ? ' <span style="color:#ffb74d">(zatrzymane ręcznie)</span>' : ''}${z.powtorka ? ' <span style="opacity:.6">(powtórka)</span>' : ''}</div>
+      <div style="margin-bottom:10px;opacity:.85">${z.koniec ? new Date(z.koniec).toLocaleString('pl-PL') : ''}${czas ? ' · trwało ' + czas : ''} · sklepów: ${z.sklepy.length} · kroków OK: <b style="color:#7ee2a8">${r.ok}</b>/${r.wszystkie}${r.zle ? ' · nie przeszło: <b style="color:#ff8a87">' + r.zle + '</b>' : ' · <b style="color:#7ee2a8">wszystko ✔</b>'}</div>
+      <table style="width:100%;border-collapse:collapse"><tr style="opacity:.7;text-align:left"><th><input type="checkbox" id="p-wsz"></th><th>Sklep</th><th>Nazwa</th><th>×/zdj.</th>${K.map(k => '<th style="font-size:11px;text-align:center;max-width:90px">' + esc(OPIS[k]) + '</th>').join('')}</tr>
+        ${z.sklepy.map(s => { const zly = K.some(k => stanKroku(s, k) !== 'ok'); return `<tr style="border-top:1px solid #2c3e50${zly ? ';background:rgba(255,82,82,.08)' : ''}"><td><input type="checkbox" class="p-s" value="${esc(s.sklep)}" ${zly ? 'checked' : ''}></td><td><b>${esc(s.sklep)}</b></td><td style="opacity:.75;font-size:12px">${esc(nazwaWza(z.hurtownia, s))}</td><td style="opacity:.75">${s.mnoznik}/${s.zdjecie}</td>${K.map(k => '<td style="text-align:center">' + ikona(s, k) + '</td>').join('')}</tr>`; }).join('')}</table>
+      ${bledy.length ? '<div style="margin-top:12px"><b style="color:#ff8a87">Co nie przeszło:</b><div style="margin-top:4px;max-height:200px;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.5 ui-monospace,Menlo,monospace">' + bledy.map(b => '<div><b>' + esc(b.sklep) + '</b> – ' + esc(b.krok) + ': <span style="color:#ffab91">' + esc(b.powod) + '</span></div>').join('') + '</div></div>' : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
+        <button id="p-log" style="${przycisk('#37474f')}">📜 Log</button>
+        <button id="p-kopiuj" style="${przycisk('#37474f')}">📋 Kopiuj</button>
+        ${bledy.length ? `<button id="p-nieudane" style="${przycisk('#6a1b9a')}">🔁 Powtórz nieudane (zaznaczone)</button>` : ''}
+        <button id="p-wszystko" style="${przycisk('#455a64')}">🔁 Powtórz wszystko (zaznaczone)</button>
+        <button id="p-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-pods-okno');
+    const zazn = () => [...o.querySelectorAll('.p-s:checked')].map(c => c.value);
+    o.querySelector('#p-wsz').onchange = e => o.querySelectorAll('.p-s').forEach(c => c.checked = e.target.checked);
+    o.querySelector('#p-zamknij').onclick = () => o.remove();
+    o.querySelector('#p-log').onclick = () => { o.remove(); logOtwarty = true; rysujPanel(); };
+    o.querySelector('#p-kopiuj').onclick = () => {
+      const t = 'Nowe sklepy – ' + z.hurtownia + ' – ' + r.ok + '/' + r.wszystkie + ' OK\n' + z.sklepy.map(s => s.sklep + ' (×' + s.mnoznik + '/' + s.zdjecie + '): ' + K.map(k => (stanKroku(s, k) === 'ok' ? '✔ ' : '✖ ') + OPIS[k]).join(', ')).join('\n') + (bledy.length ? '\n\nNie przeszło:\n' + bledy.map(b => b.sklep + ' – ' + b.krok + ': ' + b.powod).join('\n') : '');
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => alert('Skopiowane'), () => prompt('Skopiuj:', t));
+    };
+    const nb = o.querySelector('#p-nieudane'); if (nb) nb.onclick = () => { const z1 = zazn(); if (!z1.length) return alert('Zaznacz sklepy'); powtorz(z, 'nieudane', z1); };
+    o.querySelector('#p-wszystko').onclick = () => { const z1 = zazn(); if (!z1.length) return alert('Zaznacz sklepy'); powtorz(z, 'wszystko', z1); };
+  }
 
   function oknoNowe() {
     if (zad() && !confirm('Jest zadanie w toku. Zacząć nowe (stare przestanie)?')) return;
@@ -432,7 +495,8 @@
       const bledy = z.sklepy.flatMap(s => krokiZad(z).filter(k => s.ok[k] && s.ok[k] !== true).map(k => s.sklep + ' – ' + OPIS[k] + ': ' + s.ok[k]));
       log('🏁 KONIEC ' + z.hurtownia + (bledy.length ? ' – z błędami:\n   ' + bledy.join('\n   ') : ' – wszystko ✔'));
       powiadom('Nowe sklepy – koniec', z.hurtownia + ': ' + (bledy.length ? bledy.length + ' błędów (zobacz log w panelu)' : 'wszystko zrobione ✔'), bledy.length ? 4 : 3);
-      localStorage.removeItem(L_Z); rysujPanel(); return;
+      pisz(L_OST, { ...z, koniec: Date.now() });
+      localStorage.removeItem(L_Z); rysujPanel(); oknoPodsumowanie(); return;
     }
     const naParam = n.typ === 'waga' || n.typ === 'finalEan';
     const cel = naParam ? '/allegro_link_parameters.php?storage=' + encodeURIComponent('db|' + n.s.katId)
