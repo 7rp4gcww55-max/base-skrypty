@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.18-2
+// @version      2026.10.18-3
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -641,6 +641,7 @@
         <div style="font-size:12.5px;opacity:.8;margin-bottom:6px">Zawsze: Stan ≥ 1${procesKlucz() === 'finalne' ? ' i Marketplace (oferta) zawiera dowolne konto' : ''}.</div>
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="kr-bezoferty" ${lsGet('autoBezOferty') === '1' ? 'checked' : ''} style="margin-top:3px">
           <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Każdy produkt najwyżej raz na katalog – błędne i niedopasowane nie wracają w kółko. Po naprawie odznacz.</span></label>
+        <button id="kr-dokoncz" style="margin-top:8px;background:#6a1b9a;color:#fff;border:0;border-radius:6px;padding:6px 10px;font:bold 12px sans-serif;cursor:pointer">♻️ Dokończ katalogi – weź jeszcze raz wszystko, co nadal nie ma oferty</button>
       </div>
       <div style="background:#263445;border-radius:8px;padding:10px;margin-top:12px">
         <div style="font-weight:bold;margin-bottom:6px">⚡ Szybko dodaj (kliknij parametr)</div>
@@ -763,6 +764,13 @@
       lista = kopiaKrokow(PROCESY[proces].kroki); rysujListe();
     };
     $('#kr-anuluj').onclick = () => o.remove();
+    $('#kr-dokoncz').onclick = () => {
+      wyczyscSpisyBezOferty();
+      $('#kr-bezoferty').checked = true;
+      lsSet('autoBezOferty', '1');
+      try { odswiezPrzyciski(); } catch {}
+      alert('Gotowe ✔\nTryb „bez oferty” włączony, lista prób wyczyszczona.\nKliknij „Zapisz i użyj”, potem „Weź paczkę” – bot weźmie wszystko, co nadal nie ma oferty (każdy produkt raz).');
+    };
     $('#kr-zapisz').onclick = () => {
       if (pracuje) { alert('Najpierw zatrzymaj skrypt (⏸), potem zapisz kroki.'); return; }
       zachowajBiezace();
