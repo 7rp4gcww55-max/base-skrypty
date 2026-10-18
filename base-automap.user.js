@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.18-1
+// @version      2026.10.18-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2339,24 +2339,10 @@
       if (!w) { status('nie znalazłem przycisku Wystaw oferty'); return; }
       if (pomiar()) zapiszPomiar({ wystaw: Date.now() });
       zapiszPaczkeDoSpisuPrzyWystaw();
+      try { const oc = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); if (oc) { oc.wystawiono = Date.now(); localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oc)); } } catch {}
       w.click();
       await czekajNaKoniecWysylania();
-      await zapiszPoWystawieniu();
-      zamknijPomiar();
-      if (cyklWlaczony() && PROCES.poWystawieniu === 'katalog') {
-        status('wystawione – biorę kolejną paczkę');
-        await czekaj(1500);
-        await wrocDoKatalogu();
-      } else if (cyklWlaczony()) {
-        const kat = lsGet(L_KATALOG);
-        lsSet(L_ETAP, 'mapowania');
-        status('wystawione – przechodzę do mapowań');
-        await czekaj(1500);
-        location.href = adresMapowan(kat);
-      } else {
-        status('wystawione ✔');
-        pikaj(2);
-      }
+      await dalejPoWystawieniu();
     };
   }
 
@@ -2684,10 +2670,59 @@
     location.reload();
   }
 
+  // po zakończeniu wysyłania: raport + spis, potem następny etap cyklu
+  async function dalejPoWystawieniu() {
+    await zapiszPoWystawieniu();
+    zamknijPomiar();
+    if (cyklWlaczony() && PROCES.poWystawieniu === 'katalog') {
+      status('wystawione – biorę kolejną paczkę');
+      await czekaj(1500);
+      await wrocDoKatalogu();
+    } else if (cyklWlaczony()) {
+      const kat = lsGet(L_KATALOG);
+      lsSet(L_ETAP, 'mapowania');
+      status('wystawione – przechodzę do mapowań');
+      await czekaj(1500);
+      location.href = adresMapowan(kat);
+    } else {
+      status('wystawione ✔');
+      pikaj(2);
+    }
+  }
+
+  // strona przeładowała się w środku (strażnik, Safari „za dużo pamięci”, zawieszenie) – kroki zrobione, a bot by stał
+  async function wznowPoOdswiezeniu() {
+    const K_W = 'am_' + LID + '_wznow';
+    const n = (parseInt(sessionStorage.getItem(K_W)) || 0) + 1;
+    sessionStorage.setItem(K_W, String(n));
+    if (n > 4) {
+      status('stoi – ' + (n - 1) + ' wznowień po odświeżeniu nie pomogło');
+      powiadom('🛑 AutoMap stoi po odświeżeniu', 'Kroki zrobione, ale ' + (n - 1) + ' prób wznowienia nie pomogło. Zajrzyj do przeglądarki.\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'] });
+      return;
+    }
+    status('🔁 strona się przeładowała – wznawiam (próba ' + n + ')…');
+    await czekajNa(listaZaladowana, 90000);
+    await czekaj(2000);
+    let oczek = null;
+    try { oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); } catch {}
+    if (oczek && oczek.wystawiono && await mostOk()) {      // WYSTAW był już kliknięty – może wysyłanie zdążyło się skończyć
+      const r = await bazaBase('liczniki', {}, 20000);
+      const w = r.wynik;
+      if (w && Number(w.total) > 0 && (Number(w.sent) || 0) + (Number(w.error) || 0) >= Number(w.total)) {
+        status('wysyłanie skończyło się przed odświeżeniem – zapisuję raport i lecę dalej');
+        await dalejPoWystawieniu();
+        return;
+      }
+    }
+    // pokaż GOTOWE (Full auto samo kliknie WYSTAW – Base wyśle tylko to, co jeszcze nie poszło)
+    sessionStorage.setItem('am_' + LID + '_final', '1');
+    pokazPoFinalnymOdswiezeniu();
+  }
+
   async function pokazPoFinalnymOdswiezeniu() {
-    sessionStorage.removeItem('am_' + LID + '_final');
     status('ładuję wynik…');
     await czekajNa(listaZaladowana, 90000);
+    sessionStorage.removeItem('am_' + LID + '_final');   // dopiero po wczytaniu – jak strona padnie wcześniej, po odświeżeniu spróbuje znowu
     await czekaj(2000);
     window.scrollTo(0, 0);
     if (await kontrolaObowiazkowych() === 'powtarzam') return;
@@ -2766,6 +2801,7 @@
       sessionStorage.setItem(K_RUN, '1');
     }
     if (dziala() || sessionStorage.getItem(K_ODHACZ)) krok();
+    else if (cyklWlaczony() && lsGet(L_ETAP) === 'wystawianie' && !nastepny() && lsGet(L_OCZEKUJACA) && widziane.includes(LID)) wznowPoOdswiezeniu();
     else status('stoi – ' + (nastepny() ? 'następny: ' + nastepny().nazwa : 'czeka'));
   }
 
