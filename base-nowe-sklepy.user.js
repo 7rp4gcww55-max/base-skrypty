@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.18
+// @version      1.19
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -181,7 +181,7 @@
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
@@ -190,6 +190,7 @@
       ${logOtwarty ? '<div style="margin-top:6px;max-height:220px;overflow:auto;background:#0f1720;border-radius:6px;padding:6px;font:11px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap">' + l.slice(-120).reverse().map(x => x.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))).join('\n') + '</div>' : ''}`;
     panel.querySelector('#ns-nowe').onclick = oknoNowe;
     panel.querySelector('#ns-hurt').onclick = oknoHurtownie;
+    const zr = panel.querySelector('#ns-zrzut'); if (zr) zr.onclick = zrzutWagi;
     panel.querySelector('#ns-osoba').onclick = () => { const w = czytaj(L_OS_W, null); if (w && !czytaj(L_OS, null) && confirm('Pokazać wynik ostatniej zmiany osoby kontaktowej?\n(Anuluj = zacznij nową zmianę)')) return oknoOsobaWynik(); startZmianaOsoby(); };
     const os = panel.querySelector('#ns-osoba-stop'); if (os) os.onclick = () => { const j = czytaj(L_OS, null); if (j) { j.stop = true; pisz(L_OS, j); log('👤 zatrzymuję zmianę osoby…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
@@ -1032,6 +1033,26 @@
     o.classList.add('ns-os-okno');
     o.querySelector('#os-zamknij').onclick = () => o.remove();
     const pw = o.querySelector('#os-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startZmianaOsoby([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, nazwa }) => ({ id, nazwa })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
+  // 🔎 zrzut mapowania wagi dla Claude (strona Parametry Allegro katalogu)
+  function zrzutWagi() {
+    const skr = (t, n = 2500) => String(t || '').replace(/\s+/g, ' ').slice(0, n);
+    const out = ['URL: ' + location.pathname + location.search, 'wersja: ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?')];
+    const wiersze = [...document.querySelectorAll('tr')].filter(r => /waga/i.test(r.textContent));
+    out.push('tr.paramMappingRow: ' + document.querySelectorAll('tr.paramMappingRow').length + ', wiersze z „waga”: ' + wiersze.length);
+    for (const r of wiersze.slice(0, 3)) {
+      out.push('--- WIERSZ id=' + r.id + ' class=' + r.className + '\nTEKST: ' + skr(r.innerText, 400));
+      out.push('POLA: ' + [...r.querySelectorAll('input,select')].map(i => (i.id || i.name || i.className) + '=' + (i.type === 'checkbox' ? i.checked : skr(i.value, 40))).join(' | '));
+      out.push('HTML: ' + skr(r.outerHTML, 3000));
+    }
+    const ed = document.getElementById('row_-1') || document.querySelector('[id^="editor"]');
+    if (ed) out.push('--- EDYTOR: ' + skr(ed.outerHTML, 3000));
+    out.push('PRZYCISKI: ' + [...document.querySelectorAll('button')].filter(widoczny).map(b => skr(b.textContent, 30)).filter(Boolean).slice(0, 30).join(' | '));
+    out.push('ID z initial*/editor*: ' + [...document.querySelectorAll('[id^="initial"],[id^="editor"]')].slice(0, 40).map(e => e.id + '=' + skr(e.value, 20)).join(' | '));
+    out.push('LOG: ' + czytaj(L_LOG, []).filter(l => /waga|mapowanie/i.test(l)).slice(-15).join(' // '));
+    const t = out.join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => alert('Skopiowane – wklej Claude'), () => prompt('Skopiuj i wklej Claude:', t));
   }
 
   // ---------- start ----------
