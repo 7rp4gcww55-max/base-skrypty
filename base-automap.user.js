@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-4
+// @version      2026.10.19-5
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1096,14 +1096,21 @@
       odswiezPrzyciski();
     } catch {}
   }
-  // klik WYSTAW – zapas, gdyby nie było kroku „Usuń niedopasowane”
-  function zapiszPaczkeDoSpisuPrzyWystaw() {
+  // klik WYSTAW – DOPIERO TERAZ na listę 📋: wszystko, co się wczytało do formularza (wystawiane + usunięte jako niedopasowane).
+  // Niewczytane (np. wczytało się 450 z 500) – ani na liście, ani w pamięci: wrócą w następnej paczce.
+  // Paczka porzucona przed WYSTAW (zamknięta karta / cofnięcie) – nic nie idzie na listę.
+  async function zapiszPaczkeDoSpisuPrzyWystaw() {
     try {
       const oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null');
       if (!oczek || oczek.wSpisie) return;
-      let ids = [];
-      try { ids = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
-      if (!ids.length && Array.isArray(oczek.ids)) { const odrz = odrzuconeTejPaczki(); ids = oczek.ids.filter(id => !odrz.has(String(id))); }
+      let przed = [];
+      try { przed = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
+      if (!przed.length && Array.isArray(oczek.wczytane)) przed = oczek.wczytane;
+      let teraz = [];
+      if (await mostOk()) { const r = await bazaBase('idsProduktow', {}, 30000); if (r.wynik && r.wynik.ids) teraz = r.wynik.ids; }
+      const odrz = odrzuconeTejPaczki();
+      let ids = [...new Set([...przed, ...teraz].map(String))].filter(id => !odrz.has(id));
+      if (!ids.length && Array.isArray(oczek.ids)) ids = oczek.ids.map(String).filter(id => !odrz.has(id));   // ostateczność: nie dało się odczytać formularza
       zapiszWczytaneDoSpisu(ids);
     } catch {}
   }
@@ -1124,8 +1131,11 @@
     let idsPrzed = [];
     try { idsPrzed = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
     const odrzP = odrzuconeTejPaczki();
+    if (!idsPrzed.length && oczek && Array.isArray(oczek.wczytane)) idsPrzed = oczek.wczytane;
     const zPaczki = [...new Set([...((oczek && oczek.ids) || []), ...idsPrzed])];
-    const wszystkieIds = [...new Set([...zPaczki, ...ids])].filter(id => !odrzP.has(String(id)));   // niewczytane przez Base wracają do kolejki
+    // na listę tylko WCZYTANE (przed usunięciem niedopasowanych + to, co zostało w formularzu); niewczytane wracają do kolejki
+    let wszystkieIds = [...new Set([...idsPrzed, ...ids].map(String))].filter(id => !odrzP.has(id));
+    if (!wszystkieIds.length) wszystkieIds = zPaczki.map(String).filter(id => !odrzP.has(id));
     // paczka, która się NIE wystawiła (0 dobrych i 0 błędnych / brak liczników) – NIE dopisuj do spisu, wróci w następnej paczce
     const nieWyszla = !opcje.pusta && (!liczniki || ((Number(liczniki.sent) || 0) + (Number(liczniki.error) || 0) === 0));
     if (nieWyszla) {
@@ -1837,8 +1847,8 @@
       // zapamiętaj ID wszystkich produktów PRZED usunięciem (niedopasowane też trafią do spisu)
       const ri = await bazaBase('idsProduktow', {}, 30000);
       if (ri.wynik && ri.wynik.ids) {
-        sessionStorage.setItem('am_' + LID + '_idsPrzed', JSON.stringify(ri.wynik.ids));
-        zapiszWczytaneDoSpisu(ri.wynik.ids);           // wczytane (także niedopasowane) → lista 📋, dopiero potem usuwanie
+        sessionStorage.setItem('am_' + LID + '_idsPrzed', JSON.stringify(ri.wynik.ids));   // tylko PAMIĘĆ paczki – na listę 📋 dopiero przy kliknięciu WYSTAW
+        try { const oc = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); if (oc) { oc.wczytane = ri.wynik.ids.map(String); localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oc)); } } catch {}
       }
     }
     ustawSelect(sel, k.wartosc);
@@ -2421,7 +2431,7 @@
       const w = document.getElementById('button_sell_start');
       if (!w) { status('nie znalazłem przycisku Wystaw oferty'); return; }
       if (pomiar()) zapiszPomiar({ wystaw: Date.now() });
-      zapiszPaczkeDoSpisuPrzyWystaw();
+      await zapiszPaczkeDoSpisuPrzyWystaw();
       try { const oc = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); if (oc) { oc.wystawiono = Date.now(); localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oc)); } } catch {}
       w.click();
       await czekajNaKoniecWysylania();
