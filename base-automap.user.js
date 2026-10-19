@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-6
+// @version      2026.10.19-7
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2320,6 +2320,24 @@
       await czekaj(1000);
     }
     if (alarm) schowajAlarm();
+    // Base może jeszcze tworzyć oferty w tle („TWORZENIE” – np. kategorie erotyczne) – przycisk „Przerwij” już zniknął,
+    // a liczniki pokazują 0 wystawionych. Czekamy, aż liczby się ustabilizują (90 s bez zmian), max 20 min.
+    if (uzyjBazy) {
+      let ost = null, stabilnie = 0;
+      const start = Date.now();
+      while (Date.now() - start < 20 * 60000 && !stop()) {
+        const r = await bazaBase('liczniki', {}, 15000);
+        const w = r.wynik || {};
+        const sent = Number(w.sent) || 0, err = Number(w.error) || 0, tot = Number(w.total) || 0;
+        const klucz = sent + '/' + err;
+        stabilnie = klucz === ost ? stabilnie + 10 : 0; ost = klucz;
+        const wszystko = tot > 0 && sent + err >= tot;
+        status('wystawiam… Base kończy w tle: wystawione ' + sent + ', błędne ' + err + ' / ' + (tot || '?') + (stabilnie ? ' (bez zmian ' + stabilnie + ' s)' : ''));
+        if (wszystko && stabilnie >= 20) break;          // wszystko policzone i stoi 20 s
+        if (stabilnie >= 90) break;                      // 90 s bez zmian – koniec
+        await czekaj(10000);
+      }
+    }
     await czekaj(3000);
   }
 
