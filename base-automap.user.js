@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-5
+// @version      2026.10.19-6
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2340,6 +2340,7 @@
     o.innerHTML = '<div style="font-size:26px;font-weight:bold">⚠️ ' + tytul + '</div><div style="font-size:15px;margin-top:6px">' + tekst + '</div><button id="am-alarm-ok" style="margin-top:10px;background:#fff;color:#b71c1c;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer">Wyłącz dźwięk</button>';
     document.body.appendChild(o);
     o.querySelector('#am-alarm-ok').onclick = () => { clearInterval(alarmPik); alarmPik = null; o.querySelector('#am-alarm-ok').remove(); };
+    { const x = document.createElement('button'); x.textContent = '✕'; x.title = 'Schowaj alarm (bot dalej stoi)'; x.style.cssText = 'position:absolute;top:8px;right:12px;background:transparent;color:#fff;border:0;font:bold 22px sans-serif;cursor:pointer'; x.onclick = () => schowajAlarm(); o.appendChild(x); }
     pikaj(4);
     alarmPik = setInterval(() => pikaj(4), 15000);
   }
