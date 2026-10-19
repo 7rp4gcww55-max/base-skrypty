@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-8
+// @version      2026.10.19-9
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2280,12 +2280,44 @@
     .some(b => b.offsetParent !== null && /Przerwij/i.test(b.textContent));
 
   const MINUTY_BEZ_POSTEPU = 2;                       // po ilu minutach bez postępu alarm
+  // wysyłanie stoi w miejscu → odśwież stronę i kliknij WYSTAW jeszcze raz (Base wyśle tylko to, co jeszcze nie poszło); do PONOW_MAX razy na paczkę
+  const SEKUNDY_STOI_PONOW = 120, PONOW_MAX = 10;
+  async function ponowWystawianie(opis) {
+    const K = 'am_' + LID + '_ponowN';
+    const n = (parseInt(sessionStorage.getItem(K)) || 0) + 1;
+    sessionStorage.setItem(K, String(n));
+    if (n > PONOW_MAX) {
+      zatrzymajCykl('WYSTAWIANIE STOI', 'Po ' + PONOW_MAX + ' odświeżeniach i ponownym WYSTAW dalej stoi (' + (opis || '') + '). Zajrzyj do Base.');
+      return;
+    }
+    status('⏳ stoi ' + SEKUNDY_STOI_PONOW / 60 + ' min (' + (opis || '') + ') – odświeżam i wystawiam jeszcze raz (' + n + '/' + PONOW_MAX + ')…');
+    powiadom('↻ Wystawianie stało – ponawiam ' + n + '/' + PONOW_MAX, (opis || '') + '\nOdświeżam stronę i klikam WYSTAW jeszcze raz.', { tagi: ['repeat'] });
+    sessionStorage.setItem('am_' + LID + '_ponowWystaw', '1');
+    await czekaj(1500);
+    location.reload();
+    await new Promise(() => {});                          // strona się przeładowuje
+  }
+  async function ponowWystawPoOdswiezeniu() {
+    sessionStorage.removeItem('am_' + LID + '_ponowWystaw');
+    status('🔁 ponowne WYSTAW po odświeżeniu – czekam na listę…');
+    await czekajNa(listaZaladowana, 90000);
+    await czekaj(4000);
+    const w = await czekajNa(() => document.getElementById('button_sell_start'), 30000);
+    if (!w) { status('nie znalazłem przycisku Wystaw oferty – kliknij sam'); pikaj(3); return; }
+    status('🔁 klikam WYSTAW jeszcze raz…');
+    try { const oc = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); if (oc) { oc.wystawiono = Date.now(); localStorage.setItem(L_OCZEKUJACA, JSON.stringify(oc)); } } catch {}
+    w.click();
+    await czekajNaKoniecWysylania();
+    await dalejPoWystawieniu();
+  }
+
   async function czekajNaKoniecWysylania() {
     status('wystawiam… czekam na koniec');
     await czekajNa(() => oknoWysylania() || przerwijWidoczny(), 30000);
     let spokoj = 0, ostatniPostep = -1, ostatniaZmiana = Date.now(), alarm = false, opis = '';
     const uzyjBazy = await mostOk();
     // postęp = ile ofert Base już przerobił (wystawione + błędne) – z liczników Base
+    const zOkna = () => { const m = (document.body.innerText || '').match(/Wysłanych:\s*(\d+)\s*\|\s*Błędnych:\s*(\d+)\s*\|\s*Poprawnych\s*:\s*(\d+)/i); return m ? m.slice(1).join('/') : ''; };
     const postep = async () => {
       if (uzyjBazy) {
         const r = await bazaBase('liczniki', {}, 15000);
@@ -2307,6 +2339,9 @@
       if (spokoj >= 8) break;                          // 8 s bez "Przerwij" = koniec
       if (i % 5 === 0) {                               // co 5 s sprawdź postęp
         const p = await postep();
+        const okno = zOkna();
+        if (okno && okno !== czekajNaKoniecWysylania.__okno) { czekajNaKoniecWysylania.__okno = okno; ostatniaZmiana = Date.now(); }
+        if (p >= 0 && p <= ostatniPostep && Date.now() - ostatniaZmiana > SEKUNDY_STOI_PONOW * 1000) { await ponowWystawianie(opis || okno); return; }
         if (p > ostatniPostep) {                       // poszło do przodu
           ostatniPostep = p; ostatniaZmiana = Date.now();
           if (alarm) { alarm = false; schowajAlarm(); powiadom('▶ Wystawianie ruszyło', opis, { tagi: ['arrow_forward'] }); }
@@ -2329,12 +2364,13 @@
         const r = await bazaBase('liczniki', {}, 15000);
         const w = r.wynik || {};
         const sent = Number(w.sent) || 0, err = Number(w.error) || 0, tot = Number(w.total) || 0;
-        const klucz = sent + '/' + err;
+        const klucz = sent + '/' + err + '/' + zOkna();
         stabilnie = klucz === ost ? stabilnie + 10 : 0; ost = klucz;
         const wszystko = tot > 0 && sent + err >= tot;
         status('wystawiam… Base kończy w tle: wystawione ' + sent + ', błędne ' + err + ' / ' + (tot || '?') + (stabilnie ? ' (bez zmian ' + stabilnie + ' s)' : ''));
         if (wszystko && stabilnie >= 20) break;          // wszystko policzone i stoi 20 s
-        if (stabilnie >= 90) break;                      // 90 s bez zmian – koniec
+        if (!wszystko && tot > 0 && stabilnie >= SEKUNDY_STOI_PONOW) { await ponowWystawianie('wystawione ' + sent + ', błędne ' + err + ' / ' + tot + (zOkna() ? ' · okno ' + zOkna() : '')); return; }
+        if (tot <= 0 && stabilnie >= 90) break;          // brak liczników – 90 s bez zmian = koniec
         await czekaj(10000);
       }
     }
@@ -2929,6 +2965,7 @@
   }
 
   function startWystawiania() {
+    if (sessionStorage.getItem('am_' + LID + '_ponowWystaw') === '1') { ponowWystawPoOdswiezeniu(); return; }
     if (sessionStorage.getItem('am_' + LID + '_final') === '1') { pokazPoFinalnymOdswiezeniu(); return; }
     const widziane = lsJson(L_WIDZIANE);
     const nowe = !widziane.includes(LID);
