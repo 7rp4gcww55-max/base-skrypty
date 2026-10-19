@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.20
+// @version      1.21
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -56,7 +56,8 @@
   const zmien = el => { const j = $j(); if (j) j(el).trigger('input').trigger('change'); else { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } };
   const widoczny = el => !!(el && (el.offsetParent || el.getClientRects().length));
   const telefon = t => { const c = String(t || '').replace(/\D/g, ''); return c ? '+48' + c.slice(-9) : ''; };
-  const nazwaWza = (h, s) => `${String(h).toUpperCase()} AUTOMATIC PRZE-${s.nr} ${s.sklep}`;
+  const nazwaDomyslna = (h, s) => `${String(h).toUpperCase()} AUTOMATIC PRZE-${s.nr} ${s.sklep}`;
+  const nazwaWza = (h, s) => (s && s.nazwa && String(s.nazwa).trim()) ? String(s.nazwa).trim() : nazwaDomyslna(h, s);   // własna nazwa katalogu/integracji, jeśli wpisana
   function czasTekst(v) {
     const t = String(v || '24h').trim().toLowerCase();
     const m = t.match(/^(\d+)\s*(h|godz\w*)$/); if (m) return m[1] + ' godzin';
@@ -328,7 +329,7 @@
       </div>
       <div id="n-tab" style="margin-top:12px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button id="n-anuluj" style="${przycisk('#555')}">Anuluj</button><button id="n-start" style="${przycisk('#2e7d32')};display:none">② Start</button></div>`);
+        <button id="n-anuluj" style="${przycisk('#555')}">Anuluj</button><button id="n-zapisz" style="${przycisk('#6a1b9a')};display:none">💾 Zapisz (bez startu)</button><button id="n-start" style="${przycisk('#2e7d32')};display:none">② Start</button></div>`);
     let wiersze = [];
     const hSel = o.querySelector('#n-h');
     const info = () => {
@@ -350,14 +351,15 @@
       o.querySelector('#n-tab').innerHTML = `<table style="width:100%;border-collapse:collapse"><tr style="opacity:.7;text-align:left"><th>Sklep</th><th>Nr</th><th>Nazwa integracji / katalogu</th><th>Zdjęcie</th><th>Mnożnik</th><th>Czas wysyłki</th></tr>
         ${wiersze.map((w, i) => `<tr><td><input data-i="${i}" data-p="sklep" value="${esc(w.sklep)}" title="kliknij, żeby poprawić nazwę" style="${pole};width:150px;font-weight:bold">${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : w.wpisane ? ' <span style="color:#ce93d8">(wpisane)</span>' : ''}</td>
           <td><input data-i="${i}" data-p="nr" value="${w.nr}" style="${pole};width:55px"></td>
-          <td style="opacity:.8">${esc(nazwaWza(hSel.value, w))}</td>
+          <td><input data-i="${i}" data-p="nazwa" value="${esc(nazwaWza(hSel.value, w))}" title="pełna nazwa integracji i katalogu – możesz zmienić" style="${pole};width:100%;min-width:260px${w.nazwa ? ';border-color:#ce93d8' : ''}"></td>
           <td><input data-i="${i}" data-p="zdjecie" value="${w.zdjecie}" style="${pole};width:55px"></td>
           <td><input data-i="${i}" data-p="mnoznik" value="${w.mnoznik}" style="${pole};width:70px"></td>
           <td>${selCzas(w.czas, 'data-i="' + i + '" data-p="czas"')}</td></tr>`).join('')}</table><div id="n-bledy" style="color:#ff8a87;margin-top:6px"></div>`;
-      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; const p = e.dataset.p; if (p === 'sklep') { const v = e.value.trim(); if (!v) return rysuj(); const hist = historia(); let zm = false; hist.forEach(x => { if (nn(x.hurtownia) === nn(hSel.value) && nn(x.sklep) === nn(w.sklep)) { x.sklep = v; zm = true; } }); if (zm) { pisz(L_HIST, hist); istniejace(); info(); } w.sklep = v; return rysuj(); } w[p] = p === 'mnoznik' ? e.value.replace(',', '.') : p === 'czas' ? e.value : +e.value; rysuj(); });
+      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; const p = e.dataset.p; if (p === 'nazwa') { const v = e.value.trim(); if (!v || v === nazwaDomyslna(hSel.value, w)) delete w.nazwa; else w.nazwa = v; return rysuj(); } if (p === 'sklep') { const v = e.value.trim(); if (!v) return rysuj(); const hist = historia(); let zm = false; hist.forEach(x => { if (nn(x.hurtownia) === nn(hSel.value) && nn(x.sklep) === nn(w.sklep)) { x.sklep = v; zm = true; } }); if (zm) { pisz(L_HIST, hist); istniejace(); info(); } w.sklep = v; return rysuj(); } w[p] = p === 'mnoznik' ? e.value.replace(',', '.') : p === 'czas' ? e.value : +e.value; rysuj(); });
       const b = sprawdzZasady(hSel.value, wiersze);
       o.querySelector('#n-bledy').innerHTML = b.map(esc).join('<br>');
       o.querySelector('#n-start').style.display = wiersze.length ? '' : 'none';
+      o.querySelector('#n-zapisz').style.display = wiersze.length ? '' : 'none';
     };
     o.querySelector('#n-prop').onclick = () => {
       const nowe = parsujSklepy(o.querySelector('#n-s').value), wpisane = {};
@@ -365,6 +367,7 @@
       const s = [...new Map([...[...o.querySelectorAll('.n-ist:checked')].map(c => c.value), ...nowe.map(x => x.sklep)].map(x => [nn(x), x])).values()];
       if (!s.length) return alert('Zaznacz sklepy albo wpisz nowe konta Allegro');
       wiersze = zaproponuj(hSel.value, s, wpisane);
+      { const hist = historia(); wiersze.forEach(w => { const j = hist.find(x => nn(x.sklep) === nn(w.sklep) && nn(x.hurtownia) === nn(hSel.value)); if (j && j.nazwa) w.nazwa = j.nazwa; }); }
       const cz = o.querySelector('#n-czas').value; wiersze.forEach(w => { if (!w.zHistorii) w.czas = cz; });
       rysuj();
     };
@@ -428,6 +431,24 @@
       info(); istniejace();
       if (wiersze.length) { wiersze = zaproponuj(k, wiersze.map(w => w.sklep), Object.fromEntries(wiersze.filter(w => w.wpisane).map(w => [nn(w.sklep), { nr: w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie }]))); rysuj(); }
     };
+    // zapis tabeli do bazy (rezerwacja zdjęć / mnożników, nr, własna nazwa) – bez startu bota
+    const zapiszWiersze = k => {
+      const hist = historia();
+      for (const w of wiersze) {
+        const i = hist.findIndex(x => nn(x.sklep) === nn(w.sklep) && nn(x.hurtownia) === nn(k));
+        const e = { sklep: w.sklep, hurtownia: k, nr: +w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie, czas: w.czas, nazwa: w.nazwa || undefined };
+        if (i >= 0) { hist[i] = { ...hist[i], ...e }; if (!w.nazwa) delete hist[i].nazwa; } else hist.push(e);
+      }
+      pisz(L_HIST, hist);
+    };
+    o.querySelector('#n-zapisz').onclick = () => {
+      const k = hSel.value;
+      if (!wiersze.length) return;
+      const b = sprawdzZasady(k, wiersze);
+      if (b.length && !confirm('Uwagi do zasad:\n' + b.join('\n') + '\n\nZapisać mimo to?')) return;
+      zapiszWiersze(k); info(); istniejace();
+      const t = o.querySelector('#n-zapisz'); t.textContent = '✔ Zapisane'; setTimeout(() => { t.textContent = '💾 Zapisz (bez startu)'; }, 2000);
+    };
     o.querySelector('#n-start').onclick = () => {
       const k = hSel.value, h = H[k], br = brakiHurtowni(h), b = sprawdzZasady(k, wiersze);
       if (br.length) return alert('Uzupełnij dane hurtowni ' + k + ': ' + br.join(', '));
@@ -441,17 +462,10 @@
       if (tylkoZnajdzKatalog) kroki.push('katalog');
       if (b.length && wyb.some(x => x === 'allegro' || x === 'waga') && !confirm('Uwagi do zasad:\n' + b.join('\n') + '\n\nMimo to startować?')) return;
       if (!confirm('Start ' + wiersze.length + ' sklepów (' + k + '):\nKroki: ' + wyb.map(x => x === 'warunki' ? 'warunki (' + war.map(w => WARUNKI.find(y => y[0] === w)[1]).join(', ') + ')' : (WYBOR.find(y => y[0] === x) || [, x])[1]).join(', ') + '\n\n' + wiersze.map(w => nazwaWza(k, w) + '  ×' + w.mnoznik + '  zdj.' + w.zdjecie + '  ' + w.czas).join('\n'))) return;
-      // zapisz w historii (rezerwacja zdjęć / mnożników)
-      const hist = historia();
-      for (const w of wiersze) {
-        const i = hist.findIndex(x => nn(x.sklep) === nn(w.sklep));
-        const e = { sklep: w.sklep, hurtownia: k, nr: +w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie, czas: w.czas };
-        if (i >= 0) hist[i] = { ...hist[i], ...e }; else hist.push(e);
-      }
-      pisz(L_HIST, hist);
+      zapiszWiersze(k);
       pisz(L_LOG, []);
       zapiszZad({ hurtownia: k, kroki, warunki: war, tylkoZnajdzKatalog, start: Date.now(),
-        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, mnoznik: (+w.mnoznik).toFixed(2), zdjecie: +w.zdjecie, czas: w.czas, ok: {}, proby: {}, odswC: !war.includes('cennik'), odswP: !war.includes('producent') })) });
+        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, ...(w.nazwa ? { nazwa: w.nazwa } : {}), mnoznik: (+w.mnoznik).toFixed(2), zdjecie: +w.zdjecie, czas: w.czas, ok: {}, proby: {}, odswC: !war.includes('cennik'), odswP: !war.includes('producent') })) });
       log('START ' + k + ': ' + wiersze.map(w => w.sklep).join(', '));
       powiadom('Start nowych sklepów', k + ': ' + wiersze.map(w => w.sklep).join(', '));
       o.remove(); rysujPanel(); setTimeout(silnik, 500);
@@ -575,7 +589,15 @@
       return e && m ? { id: e, sklep: m[1] } : null;
     }).filter(Boolean);
   }
-  const znajdzWza = (z, s) => listaWza().find(w => nn(w.sklep) === nn(s.sklep) && String(w.nr) === String(s.nr) && nn(w.hurtownia) === nn(z.hurtownia)) || listaWza().find(w => nn(w.sklep) === nn(s.sklep) && nn(w.hurtownia) === nn(z.hurtownia));
+  const znajdzWzaPoNazwie = nazwa => {
+    for (const del of document.querySelectorAll('[onclick*="disableIntegration"]')) {
+      const oc = del.getAttribute('onclick') || ''; if (!/allegrokurier/.test(oc)) continue;
+      const id = (oc.match(/allegrokurier["']\s*,\s*["']?(\d+)/) || [])[1]; const tr = del.closest('tr');
+      if (id && tr && norm(tr.textContent).includes(norm(nazwa))) return { id };
+    }
+    return null;
+  };
+  const znajdzWza = (z, s) => (s.nazwa ? znajdzWzaPoNazwie(s.nazwa) : null) || listaWza().find(w => nn(w.sklep) === nn(s.sklep) && String(w.nr) === String(s.nr) && nn(w.hurtownia) === nn(z.hurtownia)) || listaWza().find(w => nn(w.sklep) === nn(s.sklep) && nn(w.hurtownia) === nn(z.hurtownia));
   async function zamknijModal() { document.querySelectorAll('.modal.in [data-dismiss="modal"], .modal.show [data-dismiss="modal"]').forEach(b => b.click()); await czekaj(800); }
 
   const KROK = {};
