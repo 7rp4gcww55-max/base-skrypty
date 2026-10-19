@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-2
+// @version      2026.10.19-3
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -886,8 +886,25 @@
     es.onerror = () => { /* przeglądarka sama wznowi połączenie */ };
   }
 
+  // „cała paczka niedopasowana 3×” → dopisz te produkty do spisu (nie wrócą) i włącz cykl dalej
+  async function dopiszNiedopIJedz(zEkranu) {
+    let st = null; try { st = JSON.parse(lsGet('autoNiedopFin') || 'null'); } catch {}
+    if (!st || !st.ids || !st.ids.length) { status('nie ma czekającej paczki do dopisania'); return; }
+    dodajDoSpisu(st.ids);
+    if (procesKlucz() === 'przerobki' && st.kat) dodajDoSpisuBezOferty(st.kat, st.ids);
+    lsDel('autoNiedopFin');
+    schowajAlarm();
+    lsSet(L_CYKL, '1'); lsSet(L_AUTO, '1'); if (st.full) lsSet(L_FULL, '1');
+    status('📋 dopisano ' + st.ids.length + ' niedopasowanych do spisu – biorę następną paczkę');
+    powiadom('📋 Dopisane, jadę dalej', st.ids.length + ' niedopasowanych produktów w spisie – nie wrócą.' + (zEkranu ? '' : ' (z telefonu)'), { tagi: ['clipboard'] });
+    odswiezPrzyciski();
+    await czekaj(1500);
+    await wrocDoKatalogu();
+  }
+
   // komendy wspólne dla każdej strony
   naKomende((kom, pierwsza) => {
+    if (kom === 'dopisz' && pierwsza) { dopiszNiedopIJedz(false); return; }
     if (kom === 'stop' || kom === 'reczny') {
       lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
       sessionStorage.removeItem(K_RUN);
@@ -1077,6 +1094,7 @@
   }
 
   async function zapiszPoWystawieniu(opcje = {}) {
+    if (!opcje.pusta) lsDel('autoNiedopFin');            // paczka coś dopasowała – licznik „cała niedopasowana” od zera
     let oczek = null;
     try { oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); } catch {}
     let ids = [];
@@ -2576,6 +2594,8 @@
           // a nie złe produkty – NIE dopisuj do spisu (inaczej przepadną) i zatrzymaj wszystko
           const ilePrzed = parseInt(sessionStorage.getItem('am_' + LID + '_przedNiedop')) || 0;
           if (ilePrzed >= 20) {
+            let idsCalej = []; try { idsCalej = JSON.parse(sessionStorage.getItem('am_' + LID + '_idsPrzed') || '[]'); } catch {}
+            if (!idsCalej.length) { try { idsCalej = (JSON.parse(lsGet(L_OCZEKUJACA) || 'null') || {}).ids || []; } catch {} }
             sessionStorage.removeItem('am_' + LID + '_idsPrzed');
             // przeróbki: najczęściej zostało mapowanie EAN = SKU z poprzedniej paczki → usuń je i weź tę samą paczkę jeszcze raz (raz)
             if (PROCES.poWystawieniu === 'mapowania' && cyklWlaczony() && lsGet('autoNiedopProba') !== '1') {
@@ -2588,6 +2608,32 @@
               return;
             }
             lsDel('autoNiedopProba');
+            // FINALNE: cała paczka niedopasowana → spróbuj tę samą paczkę do 3 razy; za 3. razem stop + przycisk „dopisz do spisu i jedź dalej”
+            if (PROCES.poWystawieniu === 'katalog' && idsCalej.length) {
+              let st = null; try { st = JSON.parse(lsGet('autoNiedopFin') || 'null'); } catch {}
+              const tenSam = st && Array.isArray(st.ids) && idsCalej.filter(id => st.ids.map(String).includes(String(id))).length >= 0.5 * idsCalej.length;
+              const licz = tenSam ? (st.licz || 0) + 1 : 1;
+              const oczekF = (() => { try { return JSON.parse(lsGet(L_OCZEKUJACA) || 'null') || {}; } catch { return {}; } })();
+              lsSet('autoNiedopFin', JSON.stringify({ ids: idsCalej.map(String), licz, kat: oczekF.katId || lsGet(L_KATALOG, ''), konto: oczekF.konto || '', full: lsGet(L_FULL) === '1', t: Date.now() }));
+              lsDel(L_OCZEKUJACA);
+              if (licz < 3 && cyklWlaczony()) {
+                status('cała paczka niedopasowana (' + licz + '/3) – biorę ją jeszcze raz');
+                powiadom('↻ Cała paczka niedopasowana ' + licz + '/3', ilePrzed + ' produktów, 0 dopasowanych – próbuję tę samą paczkę jeszcze raz.\n' + PROCES.nazwa + (oczekF.konto ? ' · ' + oczekF.konto : ''), { tagi: ['repeat'] });
+                await czekaj(2000);
+                await wrocDoKatalogu();
+                return;
+              }
+              lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
+              const tekst = ilePrzed + ' produktów – ' + licz + ' razy z rzędu ŻADEN nie dopasowany' + (oczekF.konto ? ' (' + oczekF.konto + ')' : '') + '. Kliknij „Dopisz do spisu i jedź dalej”, żeby te produkty już nie wracały, albo popraw i uruchom ponownie.';
+              status('🛑 cała paczka niedopasowana ' + licz + '× – czekam na decyzję');
+              pokazAlarm('CAŁA PACZKA NIEDOPASOWANA ' + licz + '×', tekst);
+              const al = document.getElementById('am-alarm');
+              if (al) { const b = document.createElement('button'); b.textContent = '📋 Dopisz do spisu i jedź dalej'; b.style.cssText = 'margin:10px 0 0 8px;background:#2e7d32;color:#fff;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer'; b.onclick = () => dopiszNiedopIJedz(true); al.appendChild(b); }
+              powiadom('🛑 Cała paczka niedopasowana ' + licz + '×', tekst + '\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'], akcje: [['📋 Dopisz i jedź dalej', 'dopisz'], ['⏹ Zostaw', 'stop']] });
+              pikaj(3);
+              odswiezPrzyciski();
+              return;
+            }
             lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
             const powod = 'Wszystkie ' + ilePrzed + ' produkty z paczki są NIEDOPASOWANE. Najczęściej: brak mapowania EAN (= SKU) dla tego katalogu albo w SKU nie ma jeszcze nowych EAN-ów z przerabiacza. Produkty NIE zostały dopisane do spisu.';
             status('🛑 zatrzymano – cała paczka niedopasowana');
