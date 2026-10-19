@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.18-3
+// @version      2026.10.19-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -149,6 +149,16 @@
     if (v === 'wyl') return null;
     return GRUPY_FINALNE[parseInt(v) || 0] || GRUPY_FINALNE[0];
   };
+  // grupa startowa zapamiętana PER KATALOG (np. ERO = bez grup, czyli bez cennika) – przy przejściu kolejki na następny katalog bierze jego ustawienie
+  const L_GRUPA_KAT = 'autoGrupaKatalogu', L_GRUPA_START = 'autoGrupaStart';
+  const grupyKat = () => { try { return JSON.parse(localStorage.getItem(L_GRUPA_KAT) || '{}') || {}; } catch { return {}; } };
+  const nazwaGrupy = v => v === 'wyl' ? 'bez grup (bez cennika)' : 'od ' + (GRUPY_FINALNE[parseInt(v) || 0] || GRUPY_FINALNE[0]).nazwa;
+  function startGrupy(id, nazwa) {
+    const m = grupyKat(); if (id && m[id] != null) return m[id];
+    if (/^\s*ERO/i.test(nazwa || '')) return 'wyl';                    // hurtownie erotyczne – wszystko paczkomat, bez cennika
+    return localStorage.getItem(L_GRUPA_START) || '0';
+  }
+  function zapiszGrupeKat(id, v) { if (!id) return; const m = grupyKat(); m[id] = v; try { localStorage.setItem(L_GRUPA_KAT, JSON.stringify(m)); } catch {} }
 
   // ===== PROFILE KROKÓW (menu ⚙️ Kroki) =====
   // profil = nazwany zestaw kroków dla obu procesów, np. "ERO", "PRZEMYSŁOWA"
@@ -511,6 +521,8 @@
         const i = v === 'wyl' ? -1 : (parseInt(v) || 0);
         const nast = i + 1 >= GRUPY_FINALNE.length ? 'wyl' : String(i + 1);
         lsSet(L_GRUPA, nast);
+        lsSet(L_GRUPA_START, nast);
+        { const kq = kolejka(); const id = (kq && kq.lista[kq.idx] && kq.lista[kq.idx].id) || document.getElementById('inventory-option-catalog')?.value; zapiszGrupeKat(id, nast); }
         odswiezGrupe();
         status('grupa tagów: ' + (grupaFinalne() ? grupaFinalne().nazwa : 'bez podziału'));
       }, 'Grupa tagów, od której startuje wystawianie (klik = następna). Po skończeniu grupy skrypt sam przechodzi do następnej.');
@@ -3154,8 +3166,14 @@
     const $ = q => o.querySelector(q);
     const rysuj = () => {
       const f = norm($('#kq-filtr').value);
-      $('#kq-lista').innerHTML = kat.filter(x => !f || norm(x.nazwa).includes(f)).map(x => `<label style="display:block;padding:2px 4px;cursor:pointer"><input type="checkbox" data-id="${x.id}" ${wybrane.has(x.id) ? 'checked' : ''}> ${x.nazwa.replace(/[<>&]/g, '')}</label>`).join('') || '<div style="opacity:.6">brak</div>';
+      const fin = procesKlucz() === 'finalne';
+      const selG = x => { const v = startGrupy(x.id, x.nazwa); return `<select data-g="${x.id}" title="grupa tagów / cennik dla tego katalogu" style="background:#263238;color:#fff;border:1px solid #455a64;border-radius:5px;font-size:11.5px;padding:1px 3px;margin-left:6px">${['0', '1', '2', 'wyl'].map(g => `<option value="${g}" ${g === v ? 'selected' : ''}>${nazwaGrupy(g)}</option>`).join('')}</select>`; };
+      $('#kq-lista').innerHTML = kat.filter(x => !f || norm(x.nazwa).includes(f)).map(x => `<div style="display:flex;align-items:center;padding:2px 4px"><label style="cursor:pointer;flex:1"><input type="checkbox" data-id="${x.id}" ${wybrane.has(x.id) ? 'checked' : ''}> ${x.nazwa.replace(/[<>&]/g, '')}</label>${fin ? selG(x) : ''}</div>`).join('') || '<div style="opacity:.6">brak</div>';
       o.querySelectorAll('#kq-lista input').forEach(c => c.onchange = () => { if (c.checked) wybrane.add(c.dataset.id); else wybrane.delete(c.dataset.id); });
+      o.querySelectorAll('#kq-lista select[data-g]').forEach(sg => sg.onchange = () => {
+        zapiszGrupeKat(sg.dataset.g, sg.value);
+        const kq = kolejka(); if (kq && kq.lista[kq.idx] && kq.lista[kq.idx].id === sg.dataset.g) { lsSet(L_GRUPA, sg.value); status('ten katalog: ' + nazwaGrupy(sg.value)); }
+      });
     };
     $('#kq-filtr').oninput = rysuj;
     $('#kq-pierwsze').onclick = () => { const n = parseInt($('#kq-ile').value) || 9999; const f = norm($('#kq-filtr').value); kat.filter(x => !f || norm(x.nazwa).includes(f)).slice(0, n).forEach(x => wybrane.add(x.id)); rysuj(); };
@@ -3178,7 +3196,7 @@
       lsSet(L_KOLEJKA, JSON.stringify({ lista, idx: 0, proces: procesKlucz(), start: Date.now() }));
       lsSet('autoKatalogDocelowy', lista[0].id);
       lsDel(L_SESJA);
-      if (procesKlucz() === 'finalne') lsSet(L_GRUPA, '0');
+      if (procesKlucz() === 'finalne') lsSet(L_GRUPA, startGrupy(lista[0].id, lista[0].nazwa));
       o.remove();
       powiadom('🗂 Kolejka katalogów', PROCES.nazwa + ': ' + lista.length + ' katalogów\n1. ' + lista[0].nazwa, { tagi: ['card_index_dividers'] });
       if (cyklWlaczony()) lsSet(L_ETAP, 'katalog');
@@ -3209,7 +3227,7 @@
       lsSet(L_KOLEJKA, JSON.stringify(k));
       lsSet('autoKatalogDocelowy', k.lista[k.idx].id);
       lsDel(L_SESJA);
-      if (procesKlucz() === 'finalne') lsSet(L_GRUPA, '0');
+      if (procesKlucz() === 'finalne') lsSet(L_GRUPA, startGrupy(k.lista[k.idx].id, k.lista[k.idx].nazwa));
       powiadom('✅ Katalog ' + k.idx + '/' + k.lista.length + ' gotowy', katNazwa + '\nWystawione ' + suma('dobre') + ' · błędne ' + suma('bledne') + '\n➡ Następny: ' + k.lista[k.idx].nazwa, { priorytet: 3, tagi: ['card_index_dividers'], akcje: [['📊 Status', 'status'], ['⏹ Stop', 'stop']] });
       status('➡ następny katalog z kolejki: ' + k.lista[k.idx].nazwa);
       lsSet(L_ETAP, 'katalog');
@@ -3394,7 +3412,7 @@
         await czekaj(1500);
         return wezPaczke();
       }
-      lsSet(L_GRUPA, '0');                              // wszystkie grupy zrobione – następny katalog zacznie od DUŻE
+      lsSet(L_GRUPA, startGrupy(katId, katNazwa));     // wszystkie grupy zrobione – wróć do ustawienia tego katalogu
     }
     if (!wybrane.length) {
       await koniecKatalogu(katId, katNazwa);
