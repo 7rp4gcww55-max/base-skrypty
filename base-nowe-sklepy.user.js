@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.19
+// @version      1.20
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -318,7 +318,8 @@
             ${WYBOR.map(([k, t]) => `<label style="display:block;margin-top:3px;max-width:330px${FINALNE.includes(k) ? ';color:#90caf9' : ''}"><input type="checkbox" class="n-krok" value="${k}" ${FINALNE.includes(k) ? '' : 'checked'}> ${k === 'warunki' ? 'Cenniki dostaw i warunki:' : t}</label>${k === 'warunki' ? '<div style="margin-left:22px">' + WARUNKI.map(([w, wt]) => `<label style="display:block;font-size:12px"><input type="checkbox" class="n-war" value="${w}" checked> ${wt}</label>`).join('') + '</div>' : ''}`).join('')}</div></div>
         <div>Sklepy tej hurtowni (zaznacz) <a href="#" id="n-ist-wsz" style="color:#90caf9;font-size:12px">wszystkie</a><br><div id="n-ist" style="${pole};width:240px;height:150px;overflow:auto"></div>
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><button id="n-ist-usun" style="${przycisk('#b71c1c')};padding:3px 8px;font-size:12px">🗑 Usuń zaznaczone</button>
-            <button id="n-ist-przen" style="${przycisk('#455a64')};padding:3px 8px;font-size:12px">↪ Przenieś do…</button></div>
+            <button id="n-ist-przen" style="${przycisk('#455a64')};padding:3px 8px;font-size:12px">↪ Przenieś do…</button>
+            <button id="n-ist-nazwa" style="${przycisk('#00695c')};padding:3px 8px;font-size:12px">✏️ Zmień nazwę</button></div>
           <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><span style="font-size:11px;opacity:.7">można od razu dać swoje: Sklep mnożnik zdjęcie</span><br><textarea id="n-s" style="${pole};width:240px;height:90px" placeholder="NowySklep&#10;InnySklep 1.45 3"></textarea></div>
           <div style="margin-top:8px">Wcześniej zrobione sklepy (do bazy)<br><span style="font-size:11px;opacity:.7">Sklep [nr] mnożnik zdjęcie – jedno w linii</span><br><textarea id="n-stare" style="${pole};width:240px;height:70px" placeholder="ProfiPrzemysl 1 1.45 3&#10;StarySklep 1.80 4"></textarea>
             <br><button id="n-stare-zap" style="${przycisk('#6a1b9a')};margin-top:4px">💾 Dopisz do bazy</button></div></div>
@@ -347,13 +348,13 @@
     o.querySelector('#n-nic').onclick = e => { e.preventDefault(); o.querySelectorAll('.n-krok').forEach(c => c.checked = false); };
     const rysuj = () => {
       o.querySelector('#n-tab').innerHTML = `<table style="width:100%;border-collapse:collapse"><tr style="opacity:.7;text-align:left"><th>Sklep</th><th>Nr</th><th>Nazwa integracji / katalogu</th><th>Zdjęcie</th><th>Mnożnik</th><th>Czas wysyłki</th></tr>
-        ${wiersze.map((w, i) => `<tr><td><b>${esc(w.sklep)}</b>${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : w.wpisane ? ' <span style="color:#ce93d8">(wpisane)</span>' : ''}</td>
+        ${wiersze.map((w, i) => `<tr><td><input data-i="${i}" data-p="sklep" value="${esc(w.sklep)}" title="kliknij, żeby poprawić nazwę" style="${pole};width:150px;font-weight:bold">${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : w.wpisane ? ' <span style="color:#ce93d8">(wpisane)</span>' : ''}</td>
           <td><input data-i="${i}" data-p="nr" value="${w.nr}" style="${pole};width:55px"></td>
           <td style="opacity:.8">${esc(nazwaWza(hSel.value, w))}</td>
           <td><input data-i="${i}" data-p="zdjecie" value="${w.zdjecie}" style="${pole};width:55px"></td>
           <td><input data-i="${i}" data-p="mnoznik" value="${w.mnoznik}" style="${pole};width:70px"></td>
           <td>${selCzas(w.czas, 'data-i="' + i + '" data-p="czas"')}</td></tr>`).join('')}</table><div id="n-bledy" style="color:#ff8a87;margin-top:6px"></div>`;
-      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; w[e.dataset.p] = e.dataset.p === 'mnoznik' ? e.value.replace(',', '.') : e.dataset.p === 'czas' ? e.value : +e.value; rysuj(); });
+      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; const p = e.dataset.p; if (p === 'sklep') { const v = e.value.trim(); if (!v) return rysuj(); const hist = historia(); let zm = false; hist.forEach(x => { if (nn(x.hurtownia) === nn(hSel.value) && nn(x.sklep) === nn(w.sklep)) { x.sklep = v; zm = true; } }); if (zm) { pisz(L_HIST, hist); istniejace(); info(); } w.sklep = v; return rysuj(); } w[p] = p === 'mnoznik' ? e.value.replace(',', '.') : p === 'czas' ? e.value : +e.value; rysuj(); });
       const b = sprawdzZasady(hSel.value, wiersze);
       o.querySelector('#n-bledy').innerHTML = b.map(esc).join('<br>');
       o.querySelector('#n-start').style.display = wiersze.length ? '' : 'none';
@@ -379,6 +380,22 @@
       const zs = new Set(z.map(nn));
       pisz(L_HIST, historia().filter(x => !(nn(x.hurtownia) === nn(k) && zs.has(nn(x.sklep)))));
       poZmianie();
+    };
+    o.querySelector('#n-ist-nazwa').onclick = () => {
+      const z = zaznaczone(), k = hSel.value;
+      if (!z.length) return alert('Zaznacz sklep(y) na liście „Sklepy tej hurtowni”');
+      const hist = historia(); let zmian = 0;
+      for (const stara of z) {
+        const nowa = (prompt('Nowa nazwa sklepu (' + k + '):', stara) || '').trim();
+        if (!nowa || nowa === stara) continue;
+        if (hist.some(x => nn(x.hurtownia) === nn(k) && nn(x.sklep) === nn(nowa) && nn(nowa) !== nn(stara))) { alert('„' + nowa + '” już jest w ' + k + ' – pomijam'); continue; }
+        hist.forEach(x => { if (nn(x.hurtownia) === nn(k) && nn(x.sklep) === nn(stara)) { x.sklep = nowa; zmian++; } });
+        wiersze.forEach(w => { if (nn(w.sklep) === nn(stara)) w.sklep = nowa; });
+      }
+      if (!zmian) return;
+      pisz(L_HIST, hist);
+      poZmianie();
+      alert('Zmienione w bazie skryptu. W Base nazwy integracji/katalogów zostają – jak już są założone pod starą nazwą, popraw je tam albo puść kroki od nowa.');
     };
     o.querySelector('#n-ist-przen').onclick = () => {
       const z = zaznaczone(), k = hSel.value;
