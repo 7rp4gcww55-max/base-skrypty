@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-7
+// @version      2026.10.19-8
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2325,7 +2325,7 @@
     if (uzyjBazy) {
       let ost = null, stabilnie = 0;
       const start = Date.now();
-      while (Date.now() - start < 20 * 60000 && !stop()) {
+      while (Date.now() - start < 20 * 60000 && !przerwanoKatalog) {
         const r = await bazaBase('liczniki', {}, 15000);
         const w = r.wynik || {};
         const sent = Number(w.sent) || 0, err = Number(w.error) || 0, tot = Number(w.total) || 0;
