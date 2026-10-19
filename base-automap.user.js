@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-1
+// @version      2026.10.19-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -577,7 +577,7 @@
     location.reload();
   }, 'Który proces: PRZERÓBKI czy FINALNE (każdy ma swoje kroki i swój spis wysłanych)');
   bTel = btn('📱', '#455a64', () => pokazTelefon(), 'Powiadomienia i sterowanie z telefonu');
-  const bKroki = btn('⚙️ Kroki' + (procesKlucz() === 'przerobki' && lsGet('autoBezOferty') === '1' ? ' · 🔁 bez oferty' : ''), '#5d4037', () => pokazKroki(), 'Wybierz, które parametry ma robić (profile: ERO, PRZEMYSŁOWA…)');
+  const bKroki = btn('⚙️ Kroki' + (procesKlucz() === 'przerobki' && lsGet('autoBezOferty') === '1' ? ' · 🔁 bez oferty' : '') + (lsGet('autoTylkoZEan') === '1' ? ' · 🏷 z EAN' : ''), '#5d4037', () => pokazKroki(), 'Wybierz, które parametry ma robić (profile: ERO, PRZEMYSŁOWA…)');
   const bLive = btn('📺', '#0277bd', pokazLive, 'Podgląd na żywo: co skrypt robi teraz, kroki, czasy i log (ze wszystkich kart)');
   const bKolejka = btn('🗂', '#00695c', () => pokazKolejke(), 'Kolejka katalogów: bot sam przechodzi z katalogu na katalog');
   panelUI.append(bProces, bKroki, bTryb, bRozmiar, bSpis, bRaport, bStaty, bLive, bTel, bKolejka);
@@ -653,6 +653,8 @@
         <div style="font-size:12.5px;opacity:.8;margin-bottom:6px">Zawsze: Stan ≥ 1${procesKlucz() === 'finalne' ? ' i Marketplace (oferta) zawiera dowolne konto' : ''}.</div>
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="kr-bezoferty" ${lsGet('autoBezOferty') === '1' ? 'checked' : ''} style="margin-top:3px">
           <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Każdy produkt najwyżej raz na katalog – błędne i niedopasowane nie wracają w kółko. Po naprawie odznacz.</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-top:8px"><input type="checkbox" id="kr-zean" ${lsGet('autoTylkoZEan') === '1' ? 'checked' : ''} style="margin-top:3px">
+          <span><b>Tylko produkty z EAN</b> (obie: przeróbki i finalne) – filtr zaawansowany: EAN · wartość nie pusta. Dla hurtowni, gdzie nie wszystkie produkty mają EAN.</span></label>
         <button id="kr-dokoncz" style="margin-top:8px;background:#6a1b9a;color:#fff;border:0;border-radius:6px;padding:6px 10px;font:bold 12px sans-serif;cursor:pointer">♻️ Dokończ katalogi – weź jeszcze raz wszystko, co nadal nie ma oferty</button>
       </div>
       <div style="background:#263445;border-radius:8px;padding:10px;margin-top:12px">
@@ -788,6 +790,7 @@
       zachowajBiezace();
       if ($('#kr-bezoferty').checked && lsGet('autoBezOferty') !== '1') wyczyscSpisyBezOferty();   // nowa runda naprawy
       lsSet('autoBezOferty', $('#kr-bezoferty').checked ? '1' : '0');
+      lsSet('autoTylkoZEan', $('#kr-zean').checked ? '1' : '0');
       zapiszProfile(profile);
       localStorage.setItem(L_PROFIL_AKT, nazwaProfilu);
       o.remove();
@@ -1554,14 +1557,21 @@
             f.tagi.forEach(t => { if (!tagiId[norm(t)]) brakTagow.push(t); });
             return { field: f.field, op: f.op, val: ids };
           }
+          if (f.niepuste) return Object.assign({}, f);
           return Object.assign({}, f, { val: (f.field === 'stock' || typeof f.val !== 'string') ? f.val : [f.val] });
         }));
+        // „wartość nie pusta”: pole EAN po nazwie z listy pól, operator po tekście („nie pusta” / „niepusta”…)
+        const niepuste = [].concat(...doUstawienia).filter(f => f.niepuste);
+        if (niepuste.length) {
+          const polePoNazwie = [...document.querySelectorAll('select option')].find(o => norm(o.textContent) === 'ean' && o.value);
+          niepuste.forEach(f => { if (polePoNazwie) f.field = polePoNazwie.value; });
+        }
         if (brakTagow.length) return { ok: false, brakTagow };
         const pusta = v => v == null || v === '' || (Array.isArray(v) && v.length === 0);
         const kompletne = () => {
           const d = table_getFiltersData(c) || [];
           const plaskie = [].concat(...d);
-          return [].concat(...doUstawienia).every(f => plaskie.some(x => x.field === f.field && x.op === f.op && !pusta(x.val)));
+          return [].concat(...doUstawienia).every(f => plaskie.some(x => x.field === f.field && x.op === f.op && (f.niepuste || !pusta(x.val))));
         };
         if (String(table_getFilteringMode(c).val()) !== String(FILTER_MODE_COMPLEX)) {
           table_setFilteringMode(c, FILTER_MODE_COMPLEX);
@@ -1584,7 +1594,18 @@
             if (ok) break;
           }
         }
-        if (!ok) return { ok: false, dane: table_getFiltersData(c), negacja: negacje.length > 0 };
+        if (!ok && niepuste.length) {
+          const zListy = [...document.querySelectorAll('select option')].filter(o => /nie\\s*(jest\\s*)?pust|niepust|not\\s*empty|wypełnion/i.test(o.textContent)).map(o => o.value);
+          const kandydaci = [...new Set([...zListy, 'NOT EMPTY', 'NOT_EMPTY', 'NOTEMPTY', 'IS NOT NULL', 'NOT NULL', '!EMPTY', 'not_empty', 'notempty'])].filter(Boolean);
+          const pola = [...new Set([niepuste[0].field, 'ean', 'product_ean', 'EAN'])];
+          szukaj: for (const pole of pola) for (const op of kandydaci) {
+            niepuste.forEach(f => { f.field = pole; f.op = op; });
+            for (let proba = 0; proba < 3 && !ok; proba++) { table_loadFilterValues(c, doUstawienia); await czekaj(900); ok = kompletne(); }
+            if (ok) break szukaj;
+          }
+          if (ok) console.log('[AutoMap] EAN niepusty: pole', niepuste[0].field, 'operator', niepuste[0].op);
+        }
+        if (!ok) return { ok: false, dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
         return { ok: true, dane: table_getFiltersData(c) };
@@ -3336,8 +3357,11 @@
     // przeróbki „tylko bez oferty”: Marketplace (oferta) NIE zawiera dowolnego konta – bierze też to, co jest w spisie (np. paczki, które się nie wystawiły)
     const bezOferty = procesKlucz() === 'przerobki' && lsGet('autoBezOferty') === '1';
     if (bezOferty) filtry = filtry.map(g => g.concat([{ field: 'link_marketplace', op: 'NOT LIKE', val: 'any_marketplace_account' }]));
+    // opcjonalnie: tylko produkty z EAN (EAN · wartość nie pusta) – kod pola i operatora szukany na stronie
+    const zEan = lsGet('autoTylkoZEan') === '1';
+    if (zEan) filtry = filtry.map(g => g.concat([{ field: 'ean', op: 'NOT EMPTY', niepuste: true }]));
     if (await czekajNa(() => wierszeProduktow().length > 0, 60000) && !stop()) {
-      status('ustawiam filtry: ' + PROCES.nazwa + (grupa ? ' · grupa ' + grupa.nazwa + ' (' + grupa.tagi.join(', ') + ')' : '') + '…');
+      status('ustawiam filtry: ' + PROCES.nazwa + (grupa ? ' · grupa ' + grupa.nazwa + ' (' + grupa.tagi.join(', ') + ')' : '') + (zEan ? ' · tylko z EAN' : '') + '…');
       const pierwszy = wierszeProduktow()[0]?.id;
       const r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
       if (r.wynik && r.wynik.brakTagow) {
@@ -3347,7 +3371,7 @@
         return;
       }
       if (r.blad || !r.wynik || !r.wynik.ok) {
-        status('STOP: nie udało się ustawić filtrów ' + PROCES.nazwa + (r.blad ? ' (' + r.blad + ')' : '') + (r.wynik && r.wynik.negacja ? ' – Base nie przyjął „nie zawiera dowolne konto” (wyłącz 🔁 albo wyślij zrzut filtrów Claude)' : ''));
+        status('STOP: nie udało się ustawić filtrów ' + PROCES.nazwa + (r.blad ? ' (' + r.blad + ')' : '') + (r.wynik && r.wynik.negacja ? ' – Base nie przyjął „nie zawiera dowolne konto” (wyłącz 🔁 albo wyślij zrzut filtrów Claude)' : '') + (r.wynik && r.wynik.niepuste ? ' – Base nie przyjął „EAN · wartość nie pusta” (wyłącz 🏷 z EAN w ⚙️ Kroki albo wyślij Claude log z konsoli [AutoMap] filtry)' : ''));
         powiadom('⚠️ Stop – filtry', 'Nie udało się ustawić filtrów ' + PROCES.nazwa + ' w katalogu.', { priorytet: 5, tagi: ['warning'] });
         console.log('[AutoMap] filtry:', r);
         pikaj(3);
