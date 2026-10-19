@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-3
+// @version      2026.10.19-4
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -220,6 +220,13 @@
   // tryb „🔁 bez oferty”: każdy produkt bierzemy w danym katalogu najwyżej RAZ (potem pomijamy – koniec pętli z błędnymi/niedopasowanymi)
   const kluczBezOferty = kat => 'autoSpisBezOferty_' + kat;
   const spisBezOferty = kat => new Set(lsJson(kluczBezOferty(kat)).map(String));
+  // licznik POPRAWNIE wystawionych ofert na konto (osobno przeróbki / finalne) – stop przy limicie (Allegro ma 20k, problemy od ~15k)
+  const L_DOBRE_KONTO = 'autoDobreKonto', L_LIMIT_DOBRYCH = 'autoLimitDobrych';
+  const limitDobrych = () => parseInt(lsGet(L_LIMIT_DOBRYCH, '15000')) || 15000;
+  const dobreKonto = () => { try { return JSON.parse(localStorage.getItem(L_DOBRE_KONTO) || '{}') || {}; } catch { return {}; } };
+  const kluczKonta = (konto, proces) => (proces || procesKlucz()) + '|' + String(konto || '').trim();
+  const ileDobrych = (konto, proces) => Number(dobreKonto()[kluczKonta(konto, proces)]) || 0;
+  const dodajDobre = (konto, n) => { const d = dobreKonto(), k = kluczKonta(konto); d[k] = (Number(d[k]) || 0) + (Number(n) || 0); lsSet(L_DOBRE_KONTO, JSON.stringify(d)); return d[k]; };
   const dodajDoSpisuBezOferty = (kat, ids) => { const s = spisBezOferty(kat); ids.forEach(i => s.add(String(i))); lsSet(kluczBezOferty(kat), JSON.stringify([...s].slice(-80000))); };
   const wyczyscSpisyBezOferty = () => { try { Object.keys(localStorage).filter(k => k.startsWith('autoSpisBezOferty_')).forEach(k => localStorage.removeItem(k)); localStorage.removeItem('autoOstatniaPaczka'); } catch {} };
   const cyklWlaczony = () => lsGet(L_CYKL) === '1';
@@ -655,6 +662,10 @@
           <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Każdy produkt najwyżej raz na katalog – błędne i niedopasowane nie wracają w kółko. Po naprawie odznacz.</span></label>
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-top:8px"><input type="checkbox" id="kr-zean" ${lsGet('autoTylkoZEan') === '1' ? 'checked' : ''} style="margin-top:3px">
           <span><b>Tylko produkty z EAN</b> (obie: przeróbki i finalne) – filtr zaawansowany: EAN · wartość nie pusta. Dla hurtowni, gdzie nie wszystkie produkty mają EAN.</span></label>
+        <div style="margin-top:10px;border-top:1px solid #37474f;padding-top:8px"><b>📊 Limit poprawnych ofert na konto</b> (${PROCES.nazwa}): <input id="kr-limit" type="number" min="1000" step="500" value="${limitDobrych()}" style="width:80px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:2px 5px"> – po tylu bot staje i daje znać.
+          <div style="font-size:12px;opacity:.8;margin:4px 0">Liczone tylko poprawnie wystawione (nie spis). Liczniki możesz poprawić (np. wpisać, ile konto już ma) albo wyzerować:</div>
+          <div id="kr-liczniki" style="max-height:140px;overflow:auto;font-size:12.5px">${Object.entries(dobreKonto()).filter(([k]) => k.startsWith(procesKlucz() + '|')).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div style="display:flex;gap:6px;align-items:center;margin:2px 0"><span style="flex:1">${k.split('|')[1].replace(/[<>&]/g, '')}</span><input class="kr-licz" data-k="${k.replace(/"/g, '')}" type="number" min="0" value="${v}" style="width:80px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:1px 4px"></div>`).join('') || '<span style="opacity:.6">brak – liczy się od teraz</span>'}</div>
+          <div style="margin-top:4px;font-size:12px">Dodaj/ustaw konto: <input id="kr-licz-konto" placeholder="nazwa konta" style="width:120px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:1px 4px"> <input id="kr-licz-ile" type="number" min="0" placeholder="ile ma" style="width:80px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:1px 4px"></div></div>
         <button id="kr-dokoncz" style="margin-top:8px;background:#6a1b9a;color:#fff;border:0;border-radius:6px;padding:6px 10px;font:bold 12px sans-serif;cursor:pointer">♻️ Dokończ katalogi – weź jeszcze raz wszystko, co nadal nie ma oferty</button>
       </div>
       <div style="background:#263445;border-radius:8px;padding:10px;margin-top:12px">
@@ -791,6 +802,10 @@
       if ($('#kr-bezoferty').checked && lsGet('autoBezOferty') !== '1') wyczyscSpisyBezOferty();   // nowa runda naprawy
       lsSet('autoBezOferty', $('#kr-bezoferty').checked ? '1' : '0');
       lsSet('autoTylkoZEan', $('#kr-zean').checked ? '1' : '0');
+      { const lim = parseInt($('#kr-limit').value); if (lim > 0) lsSet(L_LIMIT_DOBRYCH, String(lim));
+        const d = dobreKonto(); o.querySelectorAll('.kr-licz').forEach(i => { const v = parseInt(i.value); if (isNaN(v) || v <= 0) delete d[i.dataset.k]; else d[i.dataset.k] = v; });
+        const nk = $('#kr-licz-konto').value.trim(), ni = parseInt($('#kr-licz-ile').value); if (nk && !isNaN(ni)) d[kluczKonta(nk)] = ni;
+        lsSet(L_DOBRE_KONTO, JSON.stringify(d)); }
       zapiszProfile(profile);
       localStorage.setItem(L_PROFIL_AKT, nazwaProfilu);
       o.remove();
@@ -1179,6 +1194,15 @@
       }
     }
     if (!opcje.pusta) lsDel('autoNiedopProba');   // udana paczka – licznik „cała paczka niedopasowana” od nowa
+    const kontoL = (oczek && oczek.konto) || '';                 // samo konto (bez „· grupa”)
+    if (!opcje.pusta && kontoL && Number(wpis.dobre) > 0) {
+      const razem = dodajDobre(kontoL, wpis.dobre), lim = limitDobrych();
+      if (razem >= lim) {
+        zatrzymajCykl('LIMIT ' + lim.toLocaleString('pl-PL') + ' OFERT – ' + kontoL, 'Na koncie ' + kontoL + ' wystawiono już ' + razem.toLocaleString('pl-PL') + ' poprawnych ofert (' + PROCES.nazwa + '). Allegro ma limit 20 000 – zatrzymałem. Licznik zmienisz / wyzerujesz w ⚙️ Kroki.');
+      } else if (razem >= lim - 1000 && razem - Number(wpis.dobre) < lim - 1000) {
+        powiadom('⚠️ ' + kontoL + ': blisko limitu', razem.toLocaleString('pl-PL') + ' / ' + lim.toLocaleString('pl-PL') + ' poprawnych ofert na tym koncie.', { priorytet: 4, tagi: ['warning'] });
+      }
+    }
     powiadom(wpis.bezWystawienia ? '↷ Paczka bez wystawienia' : '📦 Wystawiono paczkę nr ' + wpis.nr,
       'Wzięto ' + wpis.probowano + ' · niedopasowane ' + (wpis.niedopasowane ?? '?') + (wpis.odrzucone.length ? ' · odrzucone przez Base ' + wpis.odrzucone.length : '') + '\nWystawione ' + (wpis.dobre ?? '?') + ' · błędne ' + (wpis.bledne ?? '?') + (wpis.pominiete.length ? '\n⚠️ Pominięte: ' + wpis.pominiete.join(', ') : '') + '\n' + PROCES.nazwa + ' · ' + (wpis.konto || ''),
       { tagi: ['package'], akcje: [['📊 Status', 'status'], ['⏹ Stop', 'stop']] });
@@ -3532,6 +3556,11 @@
       status('STOP: brak konta "' + ostatni + '" z nazwy katalogu');
       pikaj(4);
       alert('AutoMap: nie znalazłem konta Allegro o nazwie "' + ostatni + '" (koniec nazwy katalogu "' + katNazwa + '"). Nic nie wystawiłem.');
+      return;
+    }
+    if (ileDobrych(konto.text) >= limitDobrych()) {
+      document.querySelector('#modal_list_products .close')?.click();
+      zatrzymajCykl('LIMIT OFERT – ' + konto.text.trim(), 'Konto ' + konto.text.trim() + ' ma już ' + ileDobrych(konto.text).toLocaleString('pl-PL') + ' poprawnych ofert (limit ' + limitDobrych().toLocaleString('pl-PL') + ', ' + PROCES.nazwa + '). Nic nie wystawiłem. Licznik zmienisz w ⚙️ Kroki.');
       return;
     }
     ustawSelect(konta, konto.value);
