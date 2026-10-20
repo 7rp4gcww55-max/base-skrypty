@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.20-2
+// @version      2026.10.20-3
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1126,6 +1126,11 @@
       if (r1.wynik && r1.wynik.ids) ids = r1.wynik.ids;
       const r2 = await bazaBase('liczniki', {}, 30000);
       if (r2.wynik) liczniki = r2.wynik;
+    }
+    {   // okno „Wysyłanie”: Wysłanych = poszło do Allegro bez błędu (Poprawnych Allegro dolicza później) – liczniki Base bywają w tyle
+      let o = null; try { o = JSON.parse(sessionStorage.getItem('am_' + LID + '_okno') || 'null'); } catch {}
+      if (o && liczniki && (Number(liczniki.sent) || 0) < o.w) { liczniki = Object.assign({}, liczniki, { sent: o.w, error: Math.max(Number(liczniki.error) || 0, o.b), zOkna: true }); }
+      else if (o && !liczniki) liczniki = { sent: o.w, error: o.b, total: o.w + o.b, draft: 0, zOkna: true };
     }
     // do spisu: WSZYSTKO, co próbowaliśmy wystawić – także usunięte jako niedopasowane (żeby nie wracały w kółko)
     let idsPrzed = [];
@@ -2370,6 +2375,9 @@
     let spokoj = 0, ostatniPostep = -1, ostatniaZmiana = Date.now(), alarm = false, opis = '';
     const uzyjBazy = await mostOk();
     // postęp = ile ofert Base już przerobił (wystawione + błędne) – z liczników Base
+    const liczbyOkna = () => { const m = (document.body.innerText || '').match(/Wysłanych:\s*(\d+)\s*\|\s*Błędnych:\s*(\d+)\s*\|\s*Poprawnych\s*:\s*(\d+)/i); if (!m) return null; const o = { w: +m[1], b: +m[2], p: +m[3] }; try { sessionStorage.setItem('am_' + LID + '_okno', JSON.stringify(o)); } catch {} return o; };
+    // Base wysłał już wszystko do Allegro (Wysłanych + Błędnych = cała paczka) – „Poprawnych” Allegro dolicza potem w tle (TWORZENIE), na to nie czekamy
+    const wszystkoWyslane = tot => { const o = liczbyOkna(); const n = tot || (pomiar() && pomiar().n) || 0; return !!(o && n > 0 && o.w + o.b >= n); };
     const zOkna = () => { const m = (document.body.innerText || '').match(/Wysłanych:\s*(\d+)\s*\|\s*Błędnych:\s*(\d+)\s*\|\s*Poprawnych\s*:\s*(\d+)/i); return m ? m.slice(1).join('/') : ''; };
     const postep = async () => {
       if (uzyjBazy) {
@@ -2394,6 +2402,7 @@
       if (i % 5 === 0) {                               // co 5 s sprawdź postęp
         const p = await postep();
         const okno = zOkna();
+        if (!przerwijWidoczny() && wszystkoWyslane()) { status('Base wysłał całą paczkę (' + okno + ') – Allegro tworzy oferty w tle, lecę dalej'); break; }
         if (okno && okno !== czekajNaKoniecWysylania.__okno) { czekajNaKoniecWysylania.__okno = okno; ostatniaZmiana = Date.now(); }
         if (p >= 0 && p <= ostatniPostep && Date.now() - ostatniaZmiana > SEKUNDY_STOI_PONOW * 1000) { await ponowWystawianie(opis || okno, p + '|' + okno); return; }
         if (p > ostatniPostep) {                       // poszło do przodu
@@ -2420,6 +2429,7 @@
         const sent = Number(w.sent) || 0, err = Number(w.error) || 0, tot = Number(w.total) || 0;
         const klucz = sent + '/' + err + '/' + zOkna();
         stabilnie = klucz === ost ? stabilnie + 10 : 0; ost = klucz;
+        if (wszystkoWyslane(tot)) { status('Base wysłał całą paczkę (' + zOkna() + ') – Allegro tworzy oferty w tle, lecę dalej'); break; }
         const wszystko = tot > 0 && sent + err >= tot;
         status('wystawiam… Base kończy w tle: wystawione ' + sent + ', błędne ' + err + ' / ' + (tot || '?') + (stabilnie ? ' (bez zmian ' + stabilnie + ' s)' : ''));
         if (wszystko && stabilnie >= 20) break;          // wszystko policzone i stoi 20 s
