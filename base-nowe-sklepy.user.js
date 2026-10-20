@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.23
+// @version      1.24
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -1088,14 +1088,22 @@
   async function startPobieranie(lista) {
     if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
     if (czytaj(L_OS, null)) return alert('Trwa zmiana osoby kontaktowej – poczekaj, aż skończy.');
-    if (czytaj(L_PB, null)) return alert('Ustawianie pobierania już trwa – zobacz panel.');
+    const stare = czytaj(L_PB, null);
+    if (stare) {
+      if (pbPracuje) return alert('Ustawianie pobierania właśnie leci w tej karcie – zobacz panel.');
+      const ile = Math.min(stare.i, stare.lista.length) + '/' + stare.lista.length;
+      if (confirm('Jest niedokończone ustawianie pobierania (' + ile + ') – pewnie przerwane (inne konto Base, zamknięta karta).\n\nOK = dokończ od ' + ile + '\nAnuluj = wyczyść i zacznij od nowa')) {
+        log('⏱ wznawiam niedokończone: ' + ile); rysujPanel(); return pobieranieBieg();
+      }
+      localStorage.removeItem(L_PB); localStorage.removeItem('nsPobierStart'); log('⏱ wyczyszczone niedokończone zadanie'); rysujPanel();
+    }
     if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsPobierStart', '1'); log('⏱ przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
     if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
     await czekaj(1000);
     lista = lista || kontaAllegro();
     if (!lista.length) return alert('Nie widzę żadnej integracji Allegro na liście');
     if (!confirm('Ustawić „Pobieranie zamówień = Tak, pobieraj co 1 minutę” w integracjach Allegro: ' + lista.length + '\n\n' + lista.map(x => x.sklep).join(', ').slice(0, 400) + '\n\nNic innego w ustawieniach nie rusza. Strony nie przełączaj w trakcie.')) return;
-    pisz(L_PB, { lista, i: 0, wyniki: [], start: Date.now() });
+    pisz(L_PB, { lista, i: 0, wyniki: [], start: Date.now(), host: location.host });
     log('⏱ START pobierania co 1 min: ' + lista.length + ' integracji Allegro');
     rysujPanel(); pobieranieBieg();
   }
@@ -1193,7 +1201,9 @@
   rysujPanel();
   if (czytaj(L_OS, null) && naStronie('/list_integrations.php')) setTimeout(zmianaOsoby, 2500);
   else if (localStorage.getItem('nsOsobaStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsOsobaStart'); setTimeout(() => startZmianaOsoby(), 2500); }
-  if (czytaj(L_PB, null) && naStronie('/list_integrations.php')) setTimeout(pobieranieBieg, 2500);
+  const pbZap = czytaj(L_PB, null);
+  if (pbZap && naStronie('/list_integrations.php') && (!pbZap.host || pbZap.host === location.host)) setTimeout(pobieranieBieg, 2500);
+  else if (pbZap && pbZap.host && pbZap.host !== location.host) log('⏱ niedokończone zadanie jest z ' + pbZap.host + ' – tutaj nie wznawiam');
   else if (localStorage.getItem('nsPobierStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsPobierStart'); setTimeout(() => startPobieranie(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
