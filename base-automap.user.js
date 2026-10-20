@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.20-4
+// @version      2026.10.20-5
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1141,8 +1141,27 @@
     // na listę tylko WCZYTANE (przed usunięciem niedopasowanych + to, co zostało w formularzu); niewczytane wracają do kolejki
     let wszystkieIds = [...new Set([...idsPrzed, ...ids].map(String))].filter(id => !odrzP.has(id));
     if (!wszystkieIds.length) wszystkieIds = zPaczki.map(String).filter(id => !odrzP.has(id));
+    const sentL = Number(liczniki && liczniki.sent) || 0, errL = Number(liczniki && liczniki.error) || 0, totL = Number(liczniki && liczniki.total) || 0;
+    // produkty, których Base ani nie wystawił, ani nie oznaczył jako błędne (np. „brak prawidłowych ofert”, przerwane wysyłanie)
+    // – NIE idą do spisu, mają wrócić w kolejnej paczce
+    let wroca = [];
+    if (!opcje.pusta && liczniki && sentL + errL > 0 && totL > sentL + errL && await mostOk()) {
+      const rn = await bazaBase('niewystawione', {}, 60000);
+      const kand = (rn.wynik && rn.wynik.ok && Array.isArray(rn.wynik.ids)) ? rn.wynik.ids.map(String) : [];
+      if (kand.length && kand.length <= (totL - sentL - errL) + 5) wroca = kand;
+      else console.log('[AutoMap] niewystawione – nie biorę pod uwagę (' + kand.length + ' z ' + (totL - sentL - errL) + ')', rn);
+    }
+    if (wroca.length) {
+      const l = lsJson(L_NIEDOKONCZONE);
+      l.push({ t: Date.now(), proces: PROCES.nazwa, konto: (oczek && oczek.konto) || '', kat: (oczek && oczek.katNazwa) || '', ids: wroca, opis: 'nie wystawione i nie błędne – zostawiam poza spisem, wrócą w kolejnej paczce' });
+      lsSet(L_NIEDOKONCZONE, JSON.stringify(l.slice(-200)));
+      powiadom('↩︎ ' + wroca.length + ' produktów wraca do kolejki', 'Base ich nie wystawił i nie oznaczył jako błędne (wystawione ' + sentL + ', błędne ' + errL + ' / ' + totL + ') – nie dopisuję ich do spisu, wrócą w następnej paczce.', { priorytet: 4, tagi: ['leftwards_arrow_with_hook'] });
+      wszystkieIds = wszystkieIds.filter(id => !wroca.includes(String(id)));
+    }
     // paczka, która się NIE wystawiła (0 dobrych i 0 błędnych / brak liczników) – NIE dopisuj do spisu, wróci w następnej paczce
-    const nieWyszla = !opcje.pusta && (!liczniki || ((Number(liczniki.sent) || 0) + (Number(liczniki.error) || 0) === 0));
+    const nieWyszla = !opcje.pusta && (!liczniki || sentL + errL === 0);
+    // 0 dobrych, same błędy – też nie do spisu (niżej: STOP cyklu, żeby nie leciał dalej po paczkach bez wystawiania)
+    const zeroDobrych = !opcje.pusta && !nieWyszla && !!liczniki && sentL === 0;
     if (nieWyszla) {
       const niedopIds = idsPrzed.filter(id => !ids.map(String).includes(String(id)));   // tylko faktycznie niedopasowane idą do spisu
       if (niedopIds.length && ids.length) dodajDoSpisu(niedopIds);
@@ -1153,22 +1172,18 @@
         lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0'); lsDel('autoNieWyszlaLicz');
         pokazAlarm('2 PACZKI Z RZĘDU SIĘ NIE WYSTAWIŁY', 'Zatrzymałem cykl. Sprawdź Base / konto Allegro i włącz ponownie.');
       }
-      powiadom('⚠️ Paczka się NIE wystawiła', 'Wzięto ' + zPaczki.length + ', wystawiono 0. Produkty są już w spisie 📋 (nie wrócą same) – sprawdź Base / konto Allegro.\n' + PROCES.nazwa + ' · ' + ((oczek && oczek.konto) || ''), { priorytet: 5, tagi: ['warning'] });
-    } else { lsDel('autoNieWyszlaLicz'); if (wszystkieIds.length) dodajDoSpisu(wszystkieIds); }
+      powiadom('⚠️ Paczka się NIE wystawiła', 'Wzięto ' + zPaczki.length + ', wystawiono 0. Produkty zostają poza spisem 📋 – wrócą w kolejnej paczce. Sprawdź Base / konto Allegro.\n' + PROCES.nazwa + ' · ' + ((oczek && oczek.konto) || ''), { priorytet: 5, tagi: ['warning'] });
+    } else { lsDel('autoNieWyszlaLicz'); if (wszystkieIds.length && !zeroDobrych) dodajDoSpisu(wszystkieIds); }
     const katP = (oczek && oczek.katId) || lsGet(L_KATALOG, '') || '';
     if (oczek && oczek.bezOferty && katP) {               // tryb „bez oferty”: wzięte raz → w tym katalogu już nie wracają
       const doBO = nieWyszla ? idsPrzed.filter(id => !ids.map(String).includes(String(id))) : wszystkieIds;
-      if (doBO.length && (!nieWyszla || ids.length)) dodajDoSpisuBezOferty(katP, doBO);
+      if (doBO.length && (!nieWyszla || ids.length) && !zeroDobrych) dodajDoSpisuBezOferty(katP, doBO);
     }
     lsSet('autoOstatniaPaczka', JSON.stringify({ kat: katP, ids: zPaczki.map(String).filter(id => !odrzP.has(id)), nieWyszla, t: Date.now() }));   // tylko wczytane – niewczytane mają prawo wrócić
-    if (!opcje.pusta && !nieWyszla && liczniki) {         // 2 paczki z rzędu z 0 dobrych (same błędy) → stop
-      if ((Number(liczniki.sent) || 0) === 0) {
-        const z = (parseInt(lsGet('autoZeroDobrychLicz', '0')) || 0) + 1;
-        lsSet('autoZeroDobrychLicz', String(z));
-        if (z >= 2) {
-          lsDel('autoZeroDobrychLicz');
-          zatrzymajCykl('2 PACZKI Z RZĘDU – 0 DOBRYCH', ((oczek && oczek.konto) || '') + ': dwie paczki pod rząd dały same błędy. Zajrzyj w błędy w Base, zanim puścisz dalej.');
-        }
+    if (!opcje.pusta && !nieWyszla && liczniki) {         // 0 dobrych (same błędy) → STOP od razu, nie bierzemy kolejnej paczki
+      if (sentL === 0) {
+        lsDel('autoZeroDobrychLicz');
+        zatrzymajCykl('PACZKA BEZ ANI JEDNEJ DOBREJ OFERTY', ((oczek && oczek.konto) || '') + ': wystawione 0, błędne ' + errL + ' z ' + (totL || zPaczki.length) + '. Nie biorę kolejnej paczki. Produkty zostają POZA spisem – wrócą, jak włączysz cykl.');
       } else lsDel('autoZeroDobrychLicz');
     }
     lsDel(L_OCZEKUJACA);
