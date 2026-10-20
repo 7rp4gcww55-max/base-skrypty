@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.20-3
+// @version      2026.10.20-4
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2313,12 +2313,30 @@
   const MINUTY_BEZ_POSTEPU = 2;                       // po ilu minutach bez postępu alarm
   // wysyłanie stoi w miejscu → odśwież stronę i kliknij WYSTAW jeszcze raz (Base wyśle tylko to, co jeszcze nie poszło); do PONOW_MAX razy na paczkę
   const SEKUNDY_STOI_PONOW = 120, PONOW_MAX = 10;
+  // liczniki z opisu („wystawione X, błędne Y / Z”) albo ze stanu („X/Y/Z”) – do decyzji, czy w ogóle ponawiać
+  const liczniki = (opis, stan) => {
+    const m = String(opis || '').match(/wystawione\s+(\d+),\s*b\S*dne\s+(\d+)\s*\/\s*(\d+)/i) || String(stan || '').match(/^(\d+)\/(\d+)\/(\d+)$/);
+    return m ? { sent: +m[1], err: +m[2], tot: +m[3] } : null;
+  };
   async function ponowWystawianie(opis, stan) {
     const K = 'am_' + LID + '_ponowN', KS = 'am_' + LID + '_ponowStan';
+    // Base przerobił całą paczkę (wystawione + błędne = wszystkie) – błędnych nie wystawi ani teraz, ani po odświeżeniu.
+    // Nie ponawiamy: błędne lądują na liście ⏳ i bierzemy kolejną paczkę.
+    const l = liczniki(opis, stan);
+    if (l && l.tot > 0 && l.sent + l.err >= l.tot) {
+      sessionStorage.removeItem(K); sessionStorage.removeItem(KS);
+      if (l.err > 0) { await zakonczNiedokonczona('cała paczka przerobiona: wystawione ' + l.sent + ', błędne ' + l.err + ' – błędnych się nie da wystawić'); return; }
+      status('wszystko przerobione (' + l.sent + '/' + l.tot + ') – lecę dalej');
+      await dalejPoWystawieniu();
+      await new Promise(() => {});
+      return;
+    }
     const n = (parseInt(sessionStorage.getItem(K)) || 0) + 1;
     // po odświeżeniu i ponownym WYSTAW nic się nie ruszyło (te same liczby) → Base nie ma już czego wysłać:
     // niewystawione z tej paczki na osobną listę ⏳ i lecimy dalej (raport, mapowanie EAN / następna paczka)
     if (stan && n >= 2 && sessionStorage.getItem(KS) === String(stan)) { await zakonczNiedokonczona(opis); return; }
+    // są błędne i po jednym ponowieniu dalej stoi – to już te, których Base nie wystawi: na ⏳ i kolejna paczka
+    if (l && l.err > 0 && n >= 2) { await zakonczNiedokonczona('po ponowieniu dalej stoi: wystawione ' + l.sent + ', błędne ' + l.err + ' / ' + l.tot + ' – resztę zapisuję'); return; }
     if (stan) sessionStorage.setItem(KS, String(stan));
     sessionStorage.setItem(K, String(n));
     if (n > PONOW_MAX) {
