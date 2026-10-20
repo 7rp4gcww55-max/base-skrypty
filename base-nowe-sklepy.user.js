@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.25
+// @version      1.26
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -18,6 +18,7 @@
 //  „📍 Adres” – zmiana adresu magazynu hurtowni we WSZYSTKICH „Wysyłam z Allegro” tej hurtowni (pola odbioru pickup_*).
 //     Wybierasz hurtownię, poprawiasz ulicę/kod/miasto (PRZEMYSŁOWA ma już wpisane: Giżycka 2, 65-548 Zielona Góra),
 //     domyślnie rusza tylko te, gdzie jest stary adres; nadawcy (Tenemont) ani nic innego nie zmienia. Zapisuje też nowy adres w 🏭.
+//  „💰 Mnożnik ceny” – masowo czyści „Mnożnik ceny” w integracjach Allegro (ceny 1:1 z katalogu); mnożnik WAGI zostaje.
 //  „⏱ 1 min” – jedno zadanie: we WSZYSTKICH integracjach Allegro ustawia Pobieranie zamówień = „Tak, pobieraj co 1 minutę”.
 //     Nic więcej nie rusza. Działa z listy integracji, po kolei, z podsumowaniem i powtórką błędów.
 
@@ -36,7 +37,8 @@
   const BEZPIECZENSTWO = "Bezpieczeństwo użytkowania:\nProdukt jest bezpieczny w użytkowaniu zgodnie z jego przeznaczeniem i instrukcją producenta. Przed rozpoczęciem pracy należy zapoznać się z opisem produktu i instrukcją obsługi.\n\nŚrodki ostrożności:\n\nNależy używać odpowiedniego ubrania ochronnego, np. rękawic, okularów ochronnych lub odzieży zabezpieczającej, jeśli jest to narzędzie ręczne lub elektryczne.\n\nNie stosować produktu w sposób niezgodny z jego przeznaczeniem (np. cięcie materiałów twardszych niż przewidziano w specyfikacji).\n\nZachować ostrożność podczas pracy z ostrymi lub ruchomymi elementami (np. nożyce do prętów, strugi elektryczne).\n\nNie pozostawiać produktu w zasięgu dzieci ani osób nieprzeszkolonych, chyba że produkt jest przeznaczony dla dzieci i posiada odpowiednią informację w opisie.\n\nPrzechowywanie:\n\nProdukt należy przechowywać w suchym i bezpiecznym miejscu, z dala od źródeł ciepła i wilgoci.\n\nNarzędzia elektryczne należy przechowywać po odłączeniu od zasilania, z wyjętym wtykiem z gniazdka.\n\nOdpowiedzialność:\nProducent i sprzedawca nie ponoszą odpowiedzialności za szkody wynikające z nieprawidłowego użytkowania produktu lub użytkowania go niezgodnie z instrukcją.\n\nPodsumowanie:\nStosując się do powyższych zaleceń, produkt jest bezpieczny i zapewnia optymalne warunki pracy zgodnie z jego przeznaczeniem.";
   const STATUSY = { 473586: 'W realizacji', 473665: 'Do wysłania', 473587: 'Wysłane', 473666: 'Odebrana', 473667: 'Odebrana', 473588: 'Anulowane', 473589: 'Wstrzymane' };
   const PARAM_WAGA = 'Waga produktu z opakowaniem jednostkowym';
-  const MAX_MNOZNIK = 2.18;                               // domyślny max mnożnik (per hurtownia można zmienić w 🏭)
+  const MNOZNIK_CENY = false;                             // false = NIE ustawiaj „Mnożnika ceny” w integracji Allegro (mnożnik zostaje tylko na wadze)
+  const MAX_MNOZNIK = 2.18;                             // domyślny max mnożnik (per hurtownia można zmienić w 🏭)
   const KROKI = ['dodajWza', 'wza', 'allegro', 'warunki', 'katalog', 'waga', 'finalAllegro', 'finalEan', 'import'];
   const OPIS = { dodajWza: 'dodanie Wysyłam z Allegro', wza: 'Wysyłam z Allegro – dane', allegro: 'integracja Allegro', warunki: 'cenniki dostaw i warunki', katalog: 'katalog', import: 'import z hurtowni', waga: 'parametry: waga z mnożnikiem', finalAllegro: 'finalne: integracja (szablon, zdjęcia)', finalEan: 'finalne: mapowanie EAN = SKU' };
   const WYBOR = [['wza', 'Wysyłam z Allegro'], ['allegro', 'Integracja Allegro (zdjęcie, mnożnik, czas…)'], ['warunki', 'Cenniki dostaw i warunki (zwroty, reklamacje, gwarancja, producent)'], ['katalog', 'Katalog'], ['waga', 'Parametry: waga z mnożnikiem'], ['import', 'Import produktów z hurtowni'],
@@ -46,7 +48,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik', L_AD = 'nsAdres', L_AD_W = 'nsAdresWynik';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik', L_AD = 'nsAdres', L_AD_W = 'nsAdresWynik', L_MC = 'nsMnoznik', L_MC_W = 'nsMnoznikWynik';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; if (!localStorage.getItem('nsMigrMax218')) { for (const [k, v] of Object.entries(h)) { if (k === 'LEAN') { if (!v.maxMnoznik) v.maxMnoznik = 1.99; } else if (!v.maxMnoznik || +v.maxMnoznik === 1.99) v.maxMnoznik = MAX_MNOZNIK; } pisz(L_H, h); localStorage.setItem('nsMigrMax218', '1'); } if (h.GERMAN && !h.GERMAN.warunkiNazwa && !localStorage.getItem('nsMigrGermanWar')) { h.GERMAN.warunkiNazwa = 'AH GERMAN'; pisz(L_H, h); localStorage.setItem('nsMigrGermanWar', '1'); } return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -184,17 +186,19 @@
     const zmOs = czytaj(L_OS, null);
     const zmPb = czytaj(L_PB, null);
     const zmAd = czytaj(L_AD, null);
+    const zmMc = czytaj(L_MC, null);
     const ost = !z && czytaj(L_OST, null);
     if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${btn('ns-adres', '📍', '#1565c0')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${btn('ns-adres', '📍', '#1565c0')}${btn('ns-mnoznik', '💰', '#827717')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmPb ? '<div style="margin-top:5px;padding:5px;background:#004d40;border-radius:6px">⏱ Pobieranie co 1 min: ' + Math.min(zmPb.i, zmPb.lista.length) + '/' + zmPb.lista.length + (zmPb.lista[zmPb.i] ? ' · teraz: ' + esc(String(zmPb.lista[zmPb.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-pobier-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmAd ? '<div style="margin-top:5px;padding:5px;background:#0d47a1;border-radius:6px">📍 Adres magazynu (' + esc(zmAd.d.klucz) + '): ' + Math.min(zmAd.i, zmAd.lista.length) + '/' + zmAd.lista.length + (zmAd.lista[zmAd.i] ? ' · teraz: ' + esc(String(zmAd.lista[zmAd.i].nazwa).slice(0, 40)) : '') + ' ' + btn('ns-adres-stop', '⏹', '#c62828') + '</div>' : ''}
+      ${zmMc ? '<div style="margin-top:5px;padding:5px;background:#33691e;border-radius:6px">💰 Mnożnik ceny: ' + Math.min(zmMc.i, zmMc.lista.length) + '/' + zmMc.lista.length + (zmMc.lista[zmMc.i] ? ' · teraz: ' + esc(String(zmMc.lista[zmMc.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-mnoznik-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
@@ -208,6 +212,8 @@
     const pb = panel.querySelector('#ns-pobier-stop'); if (pb) pb.onclick = () => { const j = czytaj(L_PB, null); if (j) { j.stop = true; pisz(L_PB, j); log('⏱ zatrzymuję ustawianie pobierania…'); } };
     panel.querySelector('#ns-adres').onclick = () => { const w = czytaj(L_AD_W, null); if (w && !czytaj(L_AD, null) && confirm('Pokazać wynik ostatniej zmiany adresu magazynu?\n(Anuluj = zacznij nową zmianę)')) return oknoAdresWynik(); startAdres(); };
     const ad = panel.querySelector('#ns-adres-stop'); if (ad) ad.onclick = () => { const j = czytaj(L_AD, null); if (j) { j.stop = true; pisz(L_AD, j); log('📍 zatrzymuję zmianę adresu…'); } };
+    panel.querySelector('#ns-mnoznik').onclick = () => { const w = czytaj(L_MC_W, null); if (w && !czytaj(L_MC, null) && confirm('Pokazać wynik ostatniego czyszczenia mnożnika ceny?\n(Anuluj = zacznij nowe)')) return oknoMnoznikWynik(); startMnoznik(); };
+    const mc = panel.querySelector('#ns-mnoznik-stop'); if (mc) mc.onclick = () => { const j = czytaj(L_MC, null); if (j) { j.stop = true; pisz(L_MC, j); log('💰 zatrzymuję czyszczenie mnożnika…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
     const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
@@ -697,7 +703,7 @@
         gallery_images_sort: 'Na początku zdjęcie nr ' + s.zdjecie, gallery_images_use: 'Wstaw tylko pierwsze zdjęcie', title_auto_trim: 'Tak',
         handling_time: czasTekst(s.czas || h.czasWysylki), invoice_options: 'Faktura VAT', country_code: 'Polska', voivodeship_code: 'wielkopolskie', link_theme: 'OFERTY NOWY EAN',
         ...(BEZPIECZENSTWO ? { safety_information_type: 'Dodaj tekst' } : {}) },
-        pola: { city: 'POZNAŃ', postcode: '60-195', price_mult: s.mnoznik, ...(BEZPIECZENSTWO ? { safety_information_extra_text: BEZPIECZENSTWO } : {}) } },
+        pola: { city: 'POZNAŃ', postcode: '60-195', ...(MNOZNIK_CENY ? { price_mult: s.mnoznik } : {}), ...(BEZPIECZENSTWO ? { safety_information_extra_text: BEZPIECZENSTWO } : {}) } },
       { nazwa: 'Zwroty', tab: 'account_modal_returns', kotwica: 'download_returns', wybory: { download_returns: 'Pobieraj zwroty' } },
       { nazwa: 'Statusy zamówień', tab: 'account_modal_statuses', kotwica: 'orders_status_link', wybory: Object.assign({ orders_status_link: 'Tak' }, Object.fromEntries(Object.entries(STATUSY).map(([id, t]) => ['orders_status_link_data_' + id, t]))) },
       { nazwa: 'Ceny', tab: 'account_modal_sync_prices', kotwica: 'sync_prices_5', radio: ['sync_prices_5'], wybory: { if_zero: 'Zakończ ofertę', if_lower: 'Zmniejsz cenę w ofercie', if_bigger: 'Zwiększ cenę w ofercie do wysokości ceny w magazynie' }, pola: { end_limit_day: '4000' } },
@@ -1185,6 +1191,119 @@
   }
 
   // =====================================================================
+  // 💰 USUŃ MNOŻNIK CENY we wszystkich integracjach Allegro (nic więcej nie rusza)
+  //    Mnożnik wagi w katalogach zostaje – czyścimy tylko „Mnożnik ceny” w integracji.
+  // =====================================================================
+  const MC_POLE = 'price_mult', MC_TAB = 'account_modal_options';
+  const mcPusty = v => { const t = String(v == null ? '' : v).trim(); if (!t) return true; const n = parseFloat(t.replace(/\s/g, '').replace(',', '.')); return !isNaN(n) && Math.abs(n - 1) < 0.0001; };
+  async function startMnoznik(lista) {
+    if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
+    if (czytaj(L_OS, null)) return alert('Trwa zmiana osoby kontaktowej – poczekaj, aż skończy.');
+    if (czytaj(L_PB, null)) return alert('Trwa ustawianie pobierania co 1 min – poczekaj, aż skończy.');
+    if (czytaj(L_AD, null)) return alert('Trwa zmiana adresu magazynu – poczekaj, aż skończy.');
+    const stare = czytaj(L_MC, null);
+    if (stare && !(lista && lista.length)) {
+      if (mcPracuje) return alert('Czyszczenie mnożnika właśnie leci w tej karcie – zobacz panel.');
+      const ile = Math.min(stare.i, stare.lista.length) + '/' + stare.lista.length;
+      if (confirm('Jest niedokończone czyszczenie mnożnika ceny (' + ile + ') – pewnie przerwane.\n\nOK = dokończ od ' + ile + '\nAnuluj = wyczyść i zacznij od nowa')) {
+        log('💰 wznawiam niedokończone: ' + ile); rysujPanel(); return mnoznikBieg();
+      }
+      localStorage.removeItem(L_MC); localStorage.removeItem('nsMnoznikStart'); log('💰 wyczyszczone niedokończone zadanie'); rysujPanel();
+    }
+    if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsMnoznikStart', '1'); log('💰 przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
+    if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
+    await czekaj(1000);
+    lista = (lista && lista.length) ? lista : kontaAllegro();
+    if (!lista.length) return alert('Nie widzę żadnej integracji Allegro na liście');
+    if (!confirm('Usunąć „Mnożnik ceny” w integracjach Allegro: ' + lista.length + '\n\n' + lista.map(x => x.sklep).join(', ').slice(0, 400)
+      + '\n\nCeny będą szły 1:1 z katalogu Base. Mnożnik WAGI w katalogach zostaje bez zmian.\nNic innego w ustawieniach nie rusza. Strony nie przełączaj w trakcie.')) return;
+    pisz(L_MC, { lista, i: 0, wyniki: [], start: Date.now(), host: location.host });
+    log('💰 START czyszczenia mnożnika ceny: ' + lista.length + ' integracji Allegro');
+    rysujPanel(); mnoznikBieg();
+  }
+  let mcPracuje = false;
+  async function mnoznikBieg() {
+    if (mcPracuje) return; mcPracuje = true; bezOkienek();
+    try {
+      if (!await czekajNaFunkcje('openIntegrationSettings')) { log('💰 nie wczytała się lista integracji – odśwież stronę'); return; }
+      await czekaj(1500);
+      for (;;) {
+        const j = czytaj(L_MC, null); if (!j) return;
+        if (j.stop || j.i >= j.lista.length) break;
+        const it = j.lista[j.i];
+        let wyn;
+        try { wyn = await usunMnoznikJednej(it); } catch (e) { wyn = { stan: 'blad', info: 'błąd: ' + (e && e.message || e) }; }
+        const j2 = czytaj(L_MC, null); if (!j2) return;
+        j2.wyniki.push({ ...it, ...wyn }); j2.i++; pisz(L_MC, j2);
+        log('💰 ' + (wyn.stan === 'zmienione' ? '✔' : wyn.stan === 'blad' ? '❌' : '·') + ' ' + it.sklep + ' – ' + (wyn.info || wyn.stan));
+        rysujPanel();
+      }
+      const j = czytaj(L_MC, null); if (!j) return;
+      await zamknijModal();
+      pisz(L_MC_W, { ...j, koniec: Date.now() }); localStorage.removeItem(L_MC);
+      const ile = st => j.wyniki.filter(w => w.stan === st).length;
+      log('💰 KONIEC: wyczyszczone ' + ile('zmienione') + ', nie było ' + ile('juz') + ', błędy ' + ile('blad') + (j.stop ? ' (zatrzymane)' : ''));
+      powiadom('Mnożnik ceny – koniec', 'wyczyszczone ' + ile('zmienione') + ', błędy ' + ile('blad'), ile('blad') ? 4 : 3);
+      rysujPanel(); oknoMnoznikWynik();
+    } finally { mcPracuje = false; }
+  }
+  async function usunMnoznikJednej(it) {
+    const otworz = async () => {
+      await zamknijModal(); await czekaj(500);
+      W.openIntegrationSettings('allegro', it.id);
+      if (!await czekajNa(() => document.getElementById('gallery_images_sort'), 30000)) return null;
+      await czekaj(2000);
+      const l = document.querySelector('a[href="#' + MC_TAB + '"]'); if (l) l.click();
+      const pane = await czekajNa(() => { const p = document.getElementById(MC_TAB); return p && p.querySelector('[id="' + MC_POLE + '"]') ? p : null; }, 30000);
+      await czekaj(1000);
+      return pane;
+    };
+    const wpiszIZapisz = async (pane, wartosc) => {
+      const el = pane.querySelector('[id="' + MC_POLE + '"]');
+      if (!el) return 'brak pola mnożnika';
+      const an = W.AutoNumeric && W.AutoNumeric.getAutoNumericElement && W.AutoNumeric.getAutoNumericElement(el);
+      if (an) { try { wartosc === '' ? an.clear() : an.set(wartosc); } catch { el.value = wartosc; } } else el.value = wartosc;
+      zmien(el);
+      await czekaj(500);
+      const zap = pane.querySelector('.btn_form_save');
+      if (!zap) return 'brak przycisku Zapisz';
+      zap.click(); await czekaj(4000);
+      return '';
+    };
+    let pane = await otworz();
+    if (!pane) { await zamknijModal(); return { stan: 'blad', info: 'nie otworzyła się zakładka Wystawianie i oferty' }; }
+    const bylo = String(pane.querySelector('[id="' + MC_POLE + '"]').value || '').trim();
+    if (mcPusty(bylo)) { await zamknijModal(); return { stan: 'juz', info: 'nie było mnożnika' + (bylo ? ' (' + bylo + ')' : '') }; }
+    let b = await wpiszIZapisz(pane, '');
+    if (b) { await zamknijModal(); return { stan: 'blad', info: b }; }
+    pane = await otworz();
+    let teraz = pane ? String((pane.querySelector('[id="' + MC_POLE + '"]') || {}).value || '').trim() : '(brak)';
+    if (!mcPusty(teraz) && pane) {                        // Base nie przyjął pustego → wpisz 1 (czyli bez przeliczania)
+      b = await wpiszIZapisz(pane, '1');
+      if (!b) { pane = await otworz(); teraz = pane ? String((pane.querySelector('[id="' + MC_POLE + '"]') || {}).value || '').trim() : '(brak)'; }
+    }
+    await zamknijModal();
+    return mcPusty(teraz) ? { stan: 'zmienione', info: bylo + ' → ' + (teraz || 'puste') } : { stan: 'blad', info: 'po zapisie dalej jest „' + teraz + '”' };
+  }
+  function oknoMnoznikWynik() {
+    const j = czytaj(L_MC_W, null); if (!j) return alert('Brak wyniku');
+    document.querySelectorAll('.ns-mc-okno').forEach(x => x.remove());
+    const kol = { zmienione: ['✅', 'wyczyszczone', '#7ee2a8'], juz: ['✔', 'nie było mnożnika', '#90caf9'], blad: ['❌', 'błąd', '#ff8a87'] };
+    const ile = st => j.wyniki.filter(w => w.stan === st).length;
+    const reszta = j.lista.length - j.wyniki.length;
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">💰 Mnożnik ceny – podsumowanie${j.stop ? ' <span style="color:#ffb74d">(zatrzymane)</span>' : ''}</div>
+      <div style="margin-bottom:10px">${Object.entries(kol).map(([k, [i, t, c]]) => '<span style="color:' + c + ';margin-right:14px">' + i + ' ' + t + ': <b>' + ile(k) + '</b></span>').join('')}${reszta ? '<span style="opacity:.7">· nie sprawdzone: ' + reszta + '</span>' : ''}</div>
+      <div style="max-height:55vh;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Menlo,monospace">
+        ${j.wyniki.slice().sort((a, b) => ['blad', 'zmienione', 'juz'].indexOf(a.stan) - ['blad', 'zmienione', 'juz'].indexOf(b.stan)).map(w => '<div>' + kol[w.stan][0] + ' ' + esc(w.sklep) + ' <span style="color:' + kol[w.stan][2] + '">– ' + esc(w.info || '') + '</span></div>').join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        ${ile('blad') || reszta ? `<button id="mc-powt" style="${przycisk('#6a1b9a')}">🔁 Powtórz błędy${reszta ? ' + nie sprawdzone' : ''}</button>` : ''}
+        <button id="mc-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-mc-okno');
+    o.querySelector('#mc-zamknij').onclick = () => o.remove();
+    const pw = o.querySelector('#mc-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startMnoznik([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, sklep }) => ({ id, sklep })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
+  // =====================================================================
   // 📍 ZMIANA ADRESU ODBIORU (magazyn hurtowni) we wszystkich „Wysyłam z Allegro”
   //    Zmienia TYLKO pola odbioru (pickup_*). Nadawcy (sender_*) ani niczego innego nie rusza.
   // =====================================================================
@@ -1402,5 +1521,9 @@
   if (adZap && naStronie('/list_integrations.php') && (!adZap.host || adZap.host === location.host)) setTimeout(adresBieg, 2500);
   else if (adZap && adZap.host && adZap.host !== location.host) log('📍 niedokończona zmiana adresu jest z ' + adZap.host + ' – tutaj nie wznawiam');
   else if (localStorage.getItem('nsAdresStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsAdresStart'); setTimeout(() => startAdres(), 2500); }
+  const mcZap = czytaj(L_MC, null);
+  if (mcZap && naStronie('/list_integrations.php') && (!mcZap.host || mcZap.host === location.host)) setTimeout(mnoznikBieg, 2500);
+  else if (mcZap && mcZap.host && mcZap.host !== location.host) log('💰 niedokończone czyszczenie mnożnika jest z ' + mcZap.host + ' – tutaj nie wznawiam');
+  else if (localStorage.getItem('nsMnoznikStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsMnoznikStart'); setTimeout(() => startMnoznik(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
