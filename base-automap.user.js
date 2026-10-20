@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.20-1
+// @version      2026.10.20-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -2343,7 +2343,9 @@
     status('⏳ paczka niedokończona (' + (opis || '') + ') – ' + (ids.length ? ids.length + ' niewystawionych na liście ⏳' : 'nie rozpoznałem, które – zapisane bez ID') + ', lecę dalej');
     powiadom('⏳ Paczka niedokończona – lecę dalej', (opis || '') + '\n' + (ids.length ? ids.length + ' niewystawionych zapisanych na liście ⏳ (📋 → Niedokończone).' : 'Nie rozpoznałem, które produkty nie poszły – zapisałem wpis bez ID.'), { priorytet: 4, tagi: ['hourglass'] });
     await czekaj(1500);
+    document.querySelectorAll('.toast .close, .toast-close-button, .notification .close').forEach(b => { try { b.click(); } catch {} });
     await dalejPoWystawieniu();
+    await new Promise(() => {});                          // dalej idzie przez dalejPoWystawieniu – nie wracaj do wywołującego (bez podwójnego raportu)
   }
   async function ponowWystawPoOdswiezeniu() {
     sessionStorage.removeItem('am_' + LID + '_ponowWystaw');
@@ -2361,7 +2363,10 @@
 
   async function czekajNaKoniecWysylania() {
     status('wystawiam… czekam na koniec');
-    await czekajNa(() => oknoWysylania() || przerwijWidoczny(), 30000);
+    // „Wystąpił błąd – Brak prawidłowych ofert do wysłania” = Base nie ma czego wysłać → zapisz niewystawione i leć dalej
+    const brakOfert = () => /Brak prawid\S* ofert do wys/i.test(document.body.innerText || '');
+    await czekajNa(() => oknoWysylania() || przerwijWidoczny() || brakOfert(), 30000);
+    if (brakOfert()) { await zakonczNiedokonczona('Base: brak prawidłowych ofert do wysłania'); return; }
     let spokoj = 0, ostatniPostep = -1, ostatniaZmiana = Date.now(), alarm = false, opis = '';
     const uzyjBazy = await mostOk();
     // postęp = ile ofert Base już przerobił (wystawione + błędne) – z liczników Base
@@ -2383,6 +2388,7 @@
     };
     for (let i = 0; i < 4 * 3600; i++) {              // max 4 h
       const trwa = przerwijWidoczny();
+      if (!trwa && brakOfert()) { await zakonczNiedokonczona('Base: brak prawidłowych ofert do wysłania'); return; }
       spokoj = trwa ? 0 : spokoj + 1;
       if (spokoj >= 8) break;                          // 8 s bez "Przerwij" = koniec
       if (i % 5 === 0) {                               // co 5 s sprawdź postęp
