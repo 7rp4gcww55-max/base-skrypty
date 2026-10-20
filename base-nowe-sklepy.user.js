@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.22
+// @version      1.23
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -15,6 +15,8 @@
 //     integracja Allegro (zdjęcie, mnożnik, czas wysyłki…), katalog, import z hurtowni (jeden po drugim), waga z mnożnikiem.
 //  Warunki zwrotów / gwarancje / producenta / cennik dostaw – NIE rusza.
 //  „🏭 Hurtownie” – dane każdej hurtowni (kurier, magazyn, źródło importu, czas wysyłki), można dodać nową.
+//  „⏱ 1 min” – jedno zadanie: we WSZYSTKICH integracjach Allegro ustawia Pobieranie zamówień = „Tak, pobieraj co 1 minutę”.
+//     Nic więcej nie rusza. Działa z listy integracji, po kolei, z podsumowaniem i powtórką błędów.
 
 (() => {
   if (window.top !== window.self) return;
@@ -41,7 +43,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; if (!localStorage.getItem('nsMigrMax218')) { for (const [k, v] of Object.entries(h)) { if (k === 'LEAN') { if (!v.maxMnoznik) v.maxMnoznik = 1.99; } else if (!v.maxMnoznik || +v.maxMnoznik === 1.99) v.maxMnoznik = MAX_MNOZNIK; } pisz(L_H, h); localStorage.setItem('nsMigrMax218', '1'); } if (h.GERMAN && !h.GERMAN.warunkiNazwa && !localStorage.getItem('nsMigrGermanWar')) { h.GERMAN.warunkiNazwa = 'AH GERMAN'; pisz(L_H, h); localStorage.setItem('nsMigrGermanWar', '1'); } return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -177,15 +179,17 @@
     const btn = (id, t, k) => `<button id="${id}" style="background:${k};color:#fff;border:0;border-radius:6px;padding:5px 8px;font:bold 12px sans-serif;cursor:pointer">${t}</button>`;
     let stan = 'gotowy';
     const zmOs = czytaj(L_OS, null);
+    const zmPb = czytaj(L_PB, null);
     const ost = !z && czytaj(L_OST, null);
     if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
+      ${zmPb ? '<div style="margin-top:5px;padding:5px;background:#004d40;border-radius:6px">⏱ Pobieranie co 1 min: ' + Math.min(zmPb.i, zmPb.lista.length) + '/' + zmPb.lista.length + (zmPb.lista[zmPb.i] ? ' · teraz: ' + esc(String(zmPb.lista[zmPb.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-pobier-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
@@ -195,6 +199,8 @@
     const zr = panel.querySelector('#ns-zrzut'); if (zr) zr.onclick = zrzutWagi;
     panel.querySelector('#ns-osoba').onclick = () => { const w = czytaj(L_OS_W, null); if (w && !czytaj(L_OS, null) && confirm('Pokazać wynik ostatniej zmiany osoby kontaktowej?\n(Anuluj = zacznij nową zmianę)')) return oknoOsobaWynik(); startZmianaOsoby(); };
     const os = panel.querySelector('#ns-osoba-stop'); if (os) os.onclick = () => { const j = czytaj(L_OS, null); if (j) { j.stop = true; pisz(L_OS, j); log('👤 zatrzymuję zmianę osoby…'); } };
+    panel.querySelector('#ns-pobier').onclick = () => { const w = czytaj(L_PB_W, null); if (w && !czytaj(L_PB, null) && confirm('Pokazać wynik ostatniego ustawiania pobierania co 1 min?\n(Anuluj = zacznij od nowa)')) return oknoPobieranieWynik(); startPobieranie(); };
+    const pb = panel.querySelector('#ns-pobier-stop'); if (pb) pb.onclick = () => { const j = czytaj(L_PB, null); if (j) { j.stop = true; pisz(L_PB, j); log('⏱ zatrzymuję ustawianie pobierania…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
     const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
@@ -1075,6 +1081,94 @@
     const pw = o.querySelector('#os-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startZmianaOsoby([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, nazwa }) => ({ id, nazwa })), ...j.lista.filter(x => !zrob.has(x.id))]); };
   }
 
+  // =====================================================================
+  // ⏱ POBIERANIE ZAMÓWIEŃ CO 1 MINUTĘ we wszystkich integracjach Allegro (nic więcej nie zmienia)
+  // =====================================================================
+  const PB_RADIO = 'orders_get_2', PB_TAB = 'account_modal_orders';
+  async function startPobieranie(lista) {
+    if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
+    if (czytaj(L_OS, null)) return alert('Trwa zmiana osoby kontaktowej – poczekaj, aż skończy.');
+    if (czytaj(L_PB, null)) return alert('Ustawianie pobierania już trwa – zobacz panel.');
+    if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsPobierStart', '1'); log('⏱ przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
+    if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
+    await czekaj(1000);
+    lista = lista || kontaAllegro();
+    if (!lista.length) return alert('Nie widzę żadnej integracji Allegro na liście');
+    if (!confirm('Ustawić „Pobieranie zamówień = Tak, pobieraj co 1 minutę” w integracjach Allegro: ' + lista.length + '\n\n' + lista.map(x => x.sklep).join(', ').slice(0, 400) + '\n\nNic innego w ustawieniach nie rusza. Strony nie przełączaj w trakcie.')) return;
+    pisz(L_PB, { lista, i: 0, wyniki: [], start: Date.now() });
+    log('⏱ START pobierania co 1 min: ' + lista.length + ' integracji Allegro');
+    rysujPanel(); pobieranieBieg();
+  }
+  let pbPracuje = false;
+  async function pobieranieBieg() {
+    if (pbPracuje) return; pbPracuje = true; bezOkienek();
+    try {
+      if (!await czekajNaFunkcje('openIntegrationSettings')) { log('⏱ nie wczytała się lista integracji – odśwież stronę'); return; }
+      await czekaj(1500);
+      for (;;) {
+        const j = czytaj(L_PB, null); if (!j) return;
+        if (j.stop || j.i >= j.lista.length) break;
+        const it = j.lista[j.i];
+        let wyn;
+        try { wyn = await ustawPobieranieJednej(it); } catch (e) { wyn = { stan: 'blad', info: 'błąd: ' + (e && e.message || e) }; }
+        const j2 = czytaj(L_PB, null); if (!j2) return;
+        j2.wyniki.push({ ...it, ...wyn }); j2.i++; pisz(L_PB, j2);
+        log('⏱ ' + (wyn.stan === 'zmienione' ? '✔' : wyn.stan === 'blad' ? '❌' : '·') + ' ' + it.sklep + ' – ' + (wyn.info || wyn.stan));
+        rysujPanel();
+      }
+      const j = czytaj(L_PB, null); if (!j) return;
+      await zamknijModal();
+      pisz(L_PB_W, { ...j, koniec: Date.now() }); localStorage.removeItem(L_PB);
+      const ile = st => j.wyniki.filter(w => w.stan === st).length;
+      log('⏱ KONIEC: ustawione ' + ile('zmienione') + ', już było ' + ile('juz') + ', błędy ' + ile('blad') + (j.stop ? ' (zatrzymane)' : ''));
+      powiadom('Pobieranie co 1 min – koniec', 'ustawione ' + ile('zmienione') + ', błędy ' + ile('blad'), ile('blad') ? 4 : 3);
+      rysujPanel(); oknoPobieranieWynik();
+    } finally { pbPracuje = false; }
+  }
+  async function ustawPobieranieJednej(it) {
+    const otworz = async () => {
+      await zamknijModal(); await czekaj(500);
+      W.openIntegrationSettings('allegro', it.id);
+      if (!await czekajNa(() => document.getElementById('gallery_images_sort'), 30000)) return null;
+      await czekaj(2000);
+      const l = document.querySelector('a[href="#' + PB_TAB + '"]'); if (l) l.click();
+      const pane = await czekajNa(() => { const p = document.getElementById(PB_TAB); return p && p.querySelector('[id="' + PB_RADIO + '"]') ? p : null; }, 30000);
+      await czekaj(1000);
+      return pane;
+    };
+    let pane = await otworz();
+    if (!pane) { await zamknijModal(); return { stan: 'blad', info: 'nie otworzyła się zakładka Zamówienia' }; }
+    let el = pane.querySelector('[id="' + PB_RADIO + '"]');
+    if (el.checked) { await zamknijModal(); return { stan: 'juz', info: 'już było co 1 minutę' }; }
+    el.click(); zmien(el);
+    await czekaj(500);
+    const zap = pane.querySelector('.btn_form_save');
+    if (!zap) { await zamknijModal(); return { stan: 'blad', info: 'brak przycisku Zapisz' }; }
+    zap.click(); await czekaj(4000);
+    pane = await otworz();
+    el = pane && pane.querySelector('[id="' + PB_RADIO + '"]');
+    const ok = !!(el && el.checked);
+    await zamknijModal();
+    return ok ? { stan: 'zmienione', info: 'ustawione: co 1 minutę' } : { stan: 'blad', info: 'po zapisie dalej nie jest zaznaczone' };
+  }
+  function oknoPobieranieWynik() {
+    const j = czytaj(L_PB_W, null); if (!j) return alert('Brak wyniku');
+    document.querySelectorAll('.ns-pb-okno').forEach(x => x.remove());
+    const kol = { zmienione: ['✅', 'ustawione', '#7ee2a8'], juz: ['✔', 'już było', '#90caf9'], blad: ['❌', 'błąd', '#ff8a87'] };
+    const ile = st => j.wyniki.filter(w => w.stan === st).length;
+    const reszta = j.lista.length - j.wyniki.length;
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">⏱ Pobieranie zamówień co 1 minutę – podsumowanie${j.stop ? ' <span style="color:#ffb74d">(zatrzymane)</span>' : ''}</div>
+      <div style="margin-bottom:10px">${Object.entries(kol).map(([k, [i, t, c]]) => '<span style="color:' + c + ';margin-right:14px">' + i + ' ' + t + ': <b>' + ile(k) + '</b></span>').join('')}${reszta ? '<span style="opacity:.7">· nie sprawdzone: ' + reszta + '</span>' : ''}</div>
+      <div style="max-height:55vh;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Menlo,monospace">
+        ${j.wyniki.slice().sort((a, b) => ['blad', 'zmienione', 'juz'].indexOf(a.stan) - ['blad', 'zmienione', 'juz'].indexOf(b.stan)).map(w => '<div>' + kol[w.stan][0] + ' ' + esc(w.sklep) + ' <span style="color:' + kol[w.stan][2] + '">– ' + esc(w.info || '') + '</span></div>').join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        ${ile('blad') || reszta ? `<button id="pb-powt" style="${przycisk('#6a1b9a')}">🔁 Powtórz błędy${reszta ? ' + nie sprawdzone' : ''}</button>` : ''}
+        <button id="pb-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-pb-okno');
+    o.querySelector('#pb-zamknij').onclick = () => o.remove();
+    const pw = o.querySelector('#pb-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startPobieranie([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, sklep }) => ({ id, sklep })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
   // 🔎 zrzut mapowania wagi dla Claude (strona Parametry Allegro katalogu)
   function zrzutWagi() {
     const skr = (t, n = 2500) => String(t || '').replace(/\s+/g, ' ').slice(0, n);
@@ -1099,5 +1193,7 @@
   rysujPanel();
   if (czytaj(L_OS, null) && naStronie('/list_integrations.php')) setTimeout(zmianaOsoby, 2500);
   else if (localStorage.getItem('nsOsobaStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsOsobaStart'); setTimeout(() => startZmianaOsoby(), 2500); }
+  if (czytaj(L_PB, null) && naStronie('/list_integrations.php')) setTimeout(pobieranieBieg, 2500);
+  else if (localStorage.getItem('nsPobierStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsPobierStart'); setTimeout(() => startPobieranie(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
