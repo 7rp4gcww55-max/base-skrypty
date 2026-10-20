@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.19-9
+// @version      2026.10.20-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1401,6 +1401,7 @@
       <textarea id="am-spis-pole" style="width:100%;height:260px;background:#0f1720;color:#fff;border:1px solid #333;border-radius:6px;padding:8px;font:12px monospace">${ids.join('\n')}</textarea>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
         <button id="am-spis-kopiuj" style="background:#1565c0;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">📋 Kopiuj</button>
+        <button id="am-spis-niedok" title="ID produktów z paczek, które utknęły i się nie wystawiły (można je potem usunąć ze spisu = wrócą do kolejki)" style="background:#6d4c41;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">⏳ Niedokończone (${lsJson('autoNiedokonczone').reduce((a, w) => a + (w.ids || []).length, 0)})</button>
         <button id="am-spis-dopisz" style="background:#2e7d32;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">📥 Dopisz wklejone</button>
         <button id="am-spis-usun" title="Usuwa ze spisu ID wklejone w pole (np. produkty, które przez błąd trafiły do spisu jako niedopasowane)" style="background:#ef6c00;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">🗑 Usuń wklejone ze spisu</button>
         <button id="am-spis-boty" title="Kopiuje oba spisy i profile kroków – wklej do pliku ustawienia.json programu z botami" style="background:#6a1b9a;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">🤖 Eksport do botów</button>
@@ -1420,6 +1421,12 @@
       const t = JSON.stringify(dane);
       try { await navigator.clipboard.writeText(t); alert('Skopiowane. Wklej do pliku ustawienia.json w folderze z botami (zastąp całą zawartość).'); }
       catch { const p = o.querySelector('#am-spis-pole'); p.value = t; p.select(); document.execCommand('copy'); alert('Skopiowane – wklej do ustawienia.json'); }
+    };
+    o.querySelector('#am-spis-niedok').onclick = () => {
+      const l = lsJson('autoNiedokonczone');
+      if (!l.length) { alert('Brak niedokończonych paczek.'); return; }
+      o.querySelector('#am-spis-pole').value = [...new Set(l.flatMap(w => w.ids || []))].join('\n');
+      alert(l.length + ' niedokończonych paczek:\n' + l.slice(-15).map(w => new Date(w.t).toLocaleString('pl-PL') + ' · ' + w.proces + ' · ' + w.konto + ' · ' + (w.ids || []).length + ' szt.').join('\n') + '\n\nID są w polu. „Usuń wklejone ze spisu” = wrócą do kolejki.');
     };
     o.querySelector('#am-spis-dopisz').onclick = () => {
       const nowe = (o.querySelector('#am-spis-pole').value.match(/\d{6,}/g) || []);
@@ -1491,6 +1498,25 @@
       async test() { return { ok: typeof FormItemHelper !== 'undefined', n: (await produkty()).length }; },
       // liczniki wystawiania: total / sent (wystawione) / error (błędne) / draft
       async liczniki() { return await FormItemHelper.countItemsInDB(getListingId()); },
+      // ID produktów, które się NIE wystawiły: pole statusu szukane tak, żeby liczba „wystawionych” zgadzała się z licznikami Base
+      async niewystawione() {
+        const items = await produkty();
+        const lic = await FormItemHelper.countItemsInDB(getListingId()) || {};
+        const sent = Number(lic.sent) || 0, err = Number(lic.error) || 0;
+        const idP = it => String(it.uniqueId || '').split('_')[1];
+        const klucze = new Set(); items.slice(0, 20).forEach(it => Object.keys(it || {}).forEach(k => { const v = it[k]; if (v == null || ['string', 'number', 'boolean'].includes(typeof v)) klucze.add(k); }));
+        for (const k of klucze) {
+          const hist = {}; items.forEach(it => { const v = String(it[k]); hist[v] = (hist[v] || 0) + 1; });
+          const wartosci = Object.entries(hist);
+          if (wartosci.length < 2 || wartosci.length > 8) continue;
+          const vSent = wartosci.find(([, n]) => n === sent);
+          if (!vSent || sent === 0) continue;
+          const vErr = err ? wartosci.find(([v, n]) => n === err && v !== vSent[0]) : null;
+          const ids = items.filter(it => String(it[k]) !== vSent[0] && (!vErr || String(it[k]) !== vErr[0])).map(idP).filter(Boolean);
+          return { ok: true, pole: k, wystawione: vSent[0], ids, sent, err, total: items.length };
+        }
+        return { ok: false, sent, err, total: items.length, klucze: [...klucze].slice(0, 40), probka: items[0] ? Object.fromEntries([...klucze].slice(0, 40).map(k => [k, items[0][k]])) : null };
+      },
       // nazwy wszystkich parametrów w tej paczce (z liczbą produktów, które je mają)
       async nazwyParametrow() {
         const licz = {};
@@ -2282,9 +2308,13 @@
   const MINUTY_BEZ_POSTEPU = 2;                       // po ilu minutach bez postępu alarm
   // wysyłanie stoi w miejscu → odśwież stronę i kliknij WYSTAW jeszcze raz (Base wyśle tylko to, co jeszcze nie poszło); do PONOW_MAX razy na paczkę
   const SEKUNDY_STOI_PONOW = 120, PONOW_MAX = 10;
-  async function ponowWystawianie(opis) {
-    const K = 'am_' + LID + '_ponowN';
+  async function ponowWystawianie(opis, stan) {
+    const K = 'am_' + LID + '_ponowN', KS = 'am_' + LID + '_ponowStan';
     const n = (parseInt(sessionStorage.getItem(K)) || 0) + 1;
+    // po odświeżeniu i ponownym WYSTAW nic się nie ruszyło (te same liczby) → Base nie ma już czego wysłać:
+    // niewystawione z tej paczki na osobną listę ⏳ i lecimy dalej (raport, mapowanie EAN / następna paczka)
+    if (stan && n >= 2 && sessionStorage.getItem(KS) === String(stan)) { await zakonczNiedokonczona(opis); return; }
+    if (stan) sessionStorage.setItem(KS, String(stan));
     sessionStorage.setItem(K, String(n));
     if (n > PONOW_MAX) {
       zatrzymajCykl('WYSTAWIANIE STOI', 'Po ' + PONOW_MAX + ' odświeżeniach i ponownym WYSTAW dalej stoi (' + (opis || '') + '). Zajrzyj do Base.');
@@ -2296,6 +2326,24 @@
     await czekaj(1500);
     location.reload();
     await new Promise(() => {});                          // strona się przeładowuje
+  }
+  const L_NIEDOKONCZONE = 'autoNiedokonczone';
+  async function zakonczNiedokonczona(opis) {
+    let ids = [], info = '';
+    if (await mostOk()) {
+      const r = await bazaBase('niewystawione', {}, 60000);
+      if (r.wynik && r.wynik.ok) { ids = r.wynik.ids; info = 'pole ' + r.wynik.pole; }
+      else console.log('[AutoMap] niewystawione – nie rozpoznałem statusu:', r);
+    }
+    let oczek = null; try { oczek = JSON.parse(localStorage.getItem(L_OCZEKUJACA) || 'null'); } catch {}
+    const l = lsJson(L_NIEDOKONCZONE);
+    l.push({ t: Date.now(), proces: PROCES.nazwa, konto: (oczek && oczek.konto) || '', kat: (oczek && oczek.katNazwa) || '', ids, opis: opis || '' });
+    lsSet(L_NIEDOKONCZONE, JSON.stringify(l.slice(-200)));
+    sessionStorage.removeItem('am_' + LID + '_ponowN'); sessionStorage.removeItem('am_' + LID + '_ponowStan');
+    status('⏳ paczka niedokończona (' + (opis || '') + ') – ' + (ids.length ? ids.length + ' niewystawionych na liście ⏳' : 'nie rozpoznałem, które – zapisane bez ID') + ', lecę dalej');
+    powiadom('⏳ Paczka niedokończona – lecę dalej', (opis || '') + '\n' + (ids.length ? ids.length + ' niewystawionych zapisanych na liście ⏳ (📋 → Niedokończone).' : 'Nie rozpoznałem, które produkty nie poszły – zapisałem wpis bez ID.'), { priorytet: 4, tagi: ['hourglass'] });
+    await czekaj(1500);
+    await dalejPoWystawieniu();
   }
   async function ponowWystawPoOdswiezeniu() {
     sessionStorage.removeItem('am_' + LID + '_ponowWystaw');
@@ -2341,7 +2389,7 @@
         const p = await postep();
         const okno = zOkna();
         if (okno && okno !== czekajNaKoniecWysylania.__okno) { czekajNaKoniecWysylania.__okno = okno; ostatniaZmiana = Date.now(); }
-        if (p >= 0 && p <= ostatniPostep && Date.now() - ostatniaZmiana > SEKUNDY_STOI_PONOW * 1000) { await ponowWystawianie(opis || okno); return; }
+        if (p >= 0 && p <= ostatniPostep && Date.now() - ostatniaZmiana > SEKUNDY_STOI_PONOW * 1000) { await ponowWystawianie(opis || okno, p + '|' + okno); return; }
         if (p > ostatniPostep) {                       // poszło do przodu
           ostatniPostep = p; ostatniaZmiana = Date.now();
           if (alarm) { alarm = false; schowajAlarm(); powiadom('▶ Wystawianie ruszyło', opis, { tagi: ['arrow_forward'] }); }
@@ -2369,7 +2417,7 @@
         const wszystko = tot > 0 && sent + err >= tot;
         status('wystawiam… Base kończy w tle: wystawione ' + sent + ', błędne ' + err + ' / ' + (tot || '?') + (stabilnie ? ' (bez zmian ' + stabilnie + ' s)' : ''));
         if (wszystko && stabilnie >= 20) break;          // wszystko policzone i stoi 20 s
-        if (!wszystko && tot > 0 && stabilnie >= SEKUNDY_STOI_PONOW) { await ponowWystawianie('wystawione ' + sent + ', błędne ' + err + ' / ' + tot + (zOkna() ? ' · okno ' + zOkna() : '')); return; }
+        if (!wszystko && tot > 0 && stabilnie >= SEKUNDY_STOI_PONOW) { await ponowWystawianie('wystawione ' + sent + ', błędne ' + err + ' / ' + tot + (zOkna() ? ' · okno ' + zOkna() : ''), sent + '/' + err + '/' + tot); return; }
         if (tot <= 0 && stabilnie >= 90) break;          // brak liczników – 90 s bez zmian = koniec
         await czekaj(10000);
       }
