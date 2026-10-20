@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.24
+// @version      1.25
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -15,6 +15,9 @@
 //     integracja Allegro (zdjęcie, mnożnik, czas wysyłki…), katalog, import z hurtowni (jeden po drugim), waga z mnożnikiem.
 //  Warunki zwrotów / gwarancje / producenta / cennik dostaw – NIE rusza.
 //  „🏭 Hurtownie” – dane każdej hurtowni (kurier, magazyn, źródło importu, czas wysyłki), można dodać nową.
+//  „📍 Adres” – zmiana adresu magazynu hurtowni we WSZYSTKICH „Wysyłam z Allegro” tej hurtowni (pola odbioru pickup_*).
+//     Wybierasz hurtownię, poprawiasz ulicę/kod/miasto (PRZEMYSŁOWA ma już wpisane: Giżycka 2, 65-548 Zielona Góra),
+//     domyślnie rusza tylko te, gdzie jest stary adres; nadawcy (Tenemont) ani nic innego nie zmienia. Zapisuje też nowy adres w 🏭.
 //  „⏱ 1 min” – jedno zadanie: we WSZYSTKICH integracjach Allegro ustawia Pobieranie zamówień = „Tak, pobieraj co 1 minutę”.
 //     Nic więcej nie rusza. Działa z listy integracji, po kolei, z podsumowaniem i powtórką błędów.
 
@@ -23,7 +26,7 @@
   if (window.__baseNoweSklepy2) return; window.__baseNoweSklepy2 = true;
   const W = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
 
-  const DOMYSLNE = {"h": {"MOLOS": {"magazyn": "MOLOS V2", "import": "hurtownia", "zrodlo": "Hurtownia MOLOS V2", "kurier": {"osoba": "MOLOS", "firma": "MOLOS sp. z o.o.", "ulica": "Świerkowa 52", "kod": "05-850", "miasto": "Wieruchów", "telefon": "+48606480359", "email": "biuro@molos.com.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "F-TOYS": {"magazyn": "F-Toys", "import": "hurtownia", "zrodlo": "Hurtownia F-Toys", "kurier": {"osoba": "Plug & Play sp. z o.o.", "firma": "Plug & Play sp. z o.o.", "ulica": "Warszawska 4", "kod": "96-515", "miasto": "Seroki-Parcela", "telefon": "+48791996677", "email": "ftoys@ftoys.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": true}, "PRZEMYSŁOWA": {"magazyn": "Hurtownia Przemysłowa", "import": "baseconnect", "zrodlo": "Hurtownia Przemysłowa", "kurier": {"osoba": "Global Service Group Paweł Kapustka", "firma": "Global Service Group Paweł Kapustka", "ulica": "Urszuli 17", "kod": "65-147", "miasto": "Zielona Góra", "telefon": "+48683817000", "email": "kontakt@hurtowniaprzemyslowa.pl"}, "aliasy": ["PRZEMYSLOWA", "HURTOWNIA PRZEMYSŁOWA"], "czasWysylki": "48h", "zawszePaczkomat": false}, "BIZANTI": {"magazyn": "HURT BISANTI", "import": "baseconnect", "zrodlo": "BISANTI", "kurier": {"osoba": "PHU GERMAN", "firma": "PHU GERMAN", "ulica": "Bielska 103", "kod": "43-400", "miasto": "Cieszyn", "telefon": "+48577033555", "email": "info@bisanti.pl"}, "aliasy": ["BISANTI"], "czasWysylki": "24h", "zawszePaczkomat": false}, "LEAN": {"magazyn": "LEAN TOYS", "import": "hurtownia", "zrodlo": "Hurtownia LEAN TOYS", "kurier": {"osoba": "Magazyn LeanToys", "firma": "F.H. LEAN", "ulica": "Obrońców Poczty Gdańskiej 95", "kod": "42-400", "miasto": "Zawiercie", "telefon": "+48884877700", "email": "zamowienia@leantoys.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false, "uzyte": [{"sklep": "LEAN-1", "mnoznik": 1.51, "zdjecie": 3}, {"sklep": "LEAN-3", "mnoznik": 1.74, "zdjecie": 4}, {"sklep": "LEAN-4", "mnoznik": 1.93, "zdjecie": 5}, {"sklep": "LEAN-5", "mnoznik": 1.21, "zdjecie": 6}], "maxZdjecie": 11, "maxMnoznik": 1.99}, "VILDE": {"magazyn": "Vilde", "import": "baseconnect", "zrodlo": "Vilde", "kurier": {"osoba": "Grupa Orion Sp. z o.o.", "firma": "Grupa Orion Sp. z o.o.", "ulica": "Wiejska 49", "kod": "41-253", "miasto": "Czeladź", "telefon": "+48322014082", "email": "info@vilde.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false, "uzyte": [{"sklep": "stolipol", "mnoznik": 1.64, "zdjecie": 4}, {"sklep": "BengerV", "mnoznik": 1.31, "zdjecie": 5}, {"sklep": "milan", "mnoznik": 1.86, "zdjecie": 6}, {"sklep": "PierwszaPotrzeba", "mnoznik": 2.12, "zdjecie": 2}, {"sklep": "NaszSklepik", "mnoznik": 2.43, "zdjecie": 7}, {"sklep": "Nelior", "mnoznik": 2.81, "zdjecie": 8}, {"sklep": "KubkiGarnki", "mnoznik": 1.75, "zdjecie": 9}, {"sklep": "sususklep", "mnoznik": 1.21, "zdjecie": 10}, {"sklep": "gosposiav", "mnoznik": 1.5, "zdjecie": 11}], "maxZdjecie": 11}, "JUMI": {"magazyn": "JUMI", "import": "baseconnect", "zrodlo": "JUMI", "kurier": {"osoba": "JUMI", "firma": "JUMI", "ulica": "Myśliwska 34A", "kod": "95-200", "miasto": "Pabianice", "telefon": "+48422254800", "email": "Info@jumi.com.pl"}, "aliasy": [], "czasWysylki": "48h", "zawszePaczkomat": false}, "GERMAN": {"warunkiNazwa": "AH GERMAN", "magazyn": "GERMAN HURT", "import": "baseconnect", "zrodlo": "GERMAN HURT", "kurier": {"osoba": "GERMAN Sp. z o.o.", "firma": "GERMAN Sp. z o.o.", "ulica": "Kwiatów Polnych 11", "kod": "22-400", "miasto": "Zamość", "telefon": "+48500564777", "email": "sklep@german.com.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "K2": {"magazyn": "K2distribution", "import": "baseconnect", "zrodlo": "K2distribution", "kurier": {"osoba": "Magazyn K2distribution", "firma": "Magazyn K2distribution", "ulica": "H. Sienkiewicza 46 / D12", "kod": "41-800", "miasto": "Zabrze", "telefon": "+48885777091", "email": "b2b@k2distribution.eu"}, "aliasy": [], "czasWysylki": "3d", "zawszePaczkomat": false}, "ERO HUR": {"magazyn": "EroHurtownia.pl", "import": "baseconnect", "zrodlo": "EroHurtownia.pl", "kurier": {"osoba": "HOLDING Sp. z o.o.", "firma": "HOLDING Sp. z o.o.", "ulica": "Świeradowska 47", "kod": "02-662", "miasto": "Warszawa", "telefon": "+48223905858", "email": "biuro@holdinghandlowy.pl"}, "aliasy": ["ERO HURT", "EROHURT", "HOLDING"], "czasWysylki": "24h", "zawszePaczkomat": true}, "BIO KOMINKI": {"magazyn": "Bio Kominki", "import": "baseconnect", "zrodlo": "Bio Kominki", "kurier": {"osoba": "BIO KOMINKI GTM", "firma": "BIO KOMINKI GTM", "ulica": "DWORCOWA 56", "kod": "76-004", "miasto": "Sianów", "telefon": "+48570980028", "email": "producent@biokominkigmt.pl"}, "aliasy": ["BIOKOMINKI"], "czasWysylki": "24h", "zawszePaczkomat": false}, "FURNITEX": {"magazyn": "FURNITEX", "import": "baseconnect", "zrodlo": "FURNITEX", "kurier": {"osoba": "Radosław Roszak", "firma": "FURNITEX Radosław Roszak & Adrian Roszak", "ulica": "Przemysłowa 85", "kod": "62-510", "miasto": "Konin", "telefon": "+48608357848", "email": "adrian.roszak@furnitex.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "ERO PLACE": {"magazyn": "BaseLinker Connect Eroplace.pl", "import": "baseconnect", "zrodlo": "BaseLinker Connect Eroplace.pl", "kurier": {"osoba": "ERO PLACE 2.0", "firma": "ERO PLACE 2.0", "ulica": "ul. Brzezina 18", "kod": "44-177", "miasto": "Chudów", "telefon": "+48669230967", "email": "hurtownia@eroplace.pl"}, "aliasy": [], "czasWysylki": "3d", "zawszePaczkomat": true}, "EROTIZO": {"magazyn": "Erotizo", "zrodlo": "Hurtownia Erotizo", "import": "hurtownia", "aliasy": ["EROTIZO.PL"], "kurier": {"osoba": "EROTIZO.PL", "firma": "EROTIZO.PL", "ulica": "Energetyków 23a lok. 94b", "kod": "20-468", "miasto": "Lublin", "telefon": "", "email": "kontakt@erotizo.pl"}, "czasWysylki": "3d", "zawszePaczkomat": true}, "STAVIORI": {"magazyn": "Staviori", "zrodlo": "Staviori", "import": "baseconnect", "aliasy": [], "kurier": {"osoba": "STAVIORI", "firma": "STAVIORI", "ulica": "Jeleniogórska 16", "kod": "60-179", "miasto": "POZNAŃ", "telefon": "+48500744070", "email": "b2b@staviori.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}, "HOME DESIGN": {"magazyn": "Home Design", "zrodlo": "Home Design", "import": "baseconnect", "aliasy": [], "kurier": {"osoba": "Home Design Sylwia Stefańska Sp.k", "firma": "Home Design Sylwia Stefańska Sp.k", "ulica": "Piłsudskiego 72", "kod": "10-450", "miasto": "Olsztyn", "telefon": "+48223574246", "email": "sklep@ubieramy-meble.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}, "SKLEP TECHNICZNY": {"magazyn": "Skleptechniczny", "zrodlo": "Skleptechniczny", "import": "baseconnect", "aliasy": ["KASTOR", "SKLEPTECHNICZNY"], "kurier": {"osoba": "FIRMA KASTOR WACŁAW WIECHA", "firma": "FIRMA KASTOR WACŁAW WIECHA", "ulica": "Solidarności 10", "kod": "32-800", "miasto": "Brzeska", "telefon": "+48668010255", "email": "skleptechniczny@skleptechniczny.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}}, "hist": [{"sklep": "IntimoStyl", "hurtownia": "F-TOYS", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "VelveaShop", "hurtownia": "F-TOYS", "nr": 1, "mnoznik": 1.45, "zdjecie": 5}, {"sklep": "RubyNightPL", "hurtownia": "F-TOYS", "nr": 2, "mnoznik": 1.35, "zdjecie": 2}, {"sklep": "DiscretoPL", "hurtownia": "F-TOYS", "nr": 3, "mnoznik": 2.31, "zdjecie": 3}, {"sklep": "NocnyButik", "hurtownia": "ERO HUR", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "ProfiPrzemysl", "hurtownia": "GERMAN", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "DomowyKlimat", "hurtownia": "VILDE", "nr": 1, "mnoznik": 1.4, "zdjecie": 3}, {"sklep": "HomeStylPL", "hurtownia": "VILDE", "nr": 2, "mnoznik": 1.57, "zdjecie": 7}, {"sklep": "KuchniaDeco", "hurtownia": "VILDE", "nr": 3, "mnoznik": 1.98, "zdjecie": 10}, {"sklep": "WnetrzaPlus", "hurtownia": "VILDE", "nr": 4, "mnoznik": 2.27, "zdjecie": 5}, {"sklep": "CozyDom", "hurtownia": "VILDE", "nr": 5, "mnoznik": 1.15, "zdjecie": 8}, {"sklep": "PorzadekWDomuPL", "hurtownia": "VILDE", "nr": 6, "mnoznik": 2.62, "zdjecie": 9}, {"sklep": "KlockoweCentrum", "hurtownia": "LEAN", "nr": 1, "mnoznik": 1.33, "zdjecie": 2}, {"sklep": "PlacZabawPL", "hurtownia": "LEAN", "nr": 2, "mnoznik": 1.86, "zdjecie": 2}, {"sklep": "MisiowyKacik", "hurtownia": "LEAN", "nr": 3, "mnoznik": 1.12, "zdjecie": 3}, {"sklep": "ToyBazarPL", "hurtownia": "LEAN", "nr": 4, "mnoznik": 1.4, "zdjecie": 4}, {"sklep": "KreatywnyMaluch", "hurtownia": "LEAN", "nr": 5, "mnoznik": 1.62, "zdjecie": 5}, {"sklep": "ZabawkiTuTek", "hurtownia": "LEAN", "nr": 6, "mnoznik": 1.68, "zdjecie": 6}, {"sklep": "BajkowyStore", "hurtownia": "LEAN", "nr": 7, "mnoznik": 1.27, "zdjecie": 5}, {"sklep": "RadosnaJutka", "hurtownia": "LEAN", "nr": 8, "mnoznik": 1.06, "zdjecie": 4}]};
+  const DOMYSLNE = {"h": {"MOLOS": {"magazyn": "MOLOS V2", "import": "hurtownia", "zrodlo": "Hurtownia MOLOS V2", "kurier": {"osoba": "MOLOS", "firma": "MOLOS sp. z o.o.", "ulica": "Świerkowa 52", "kod": "05-850", "miasto": "Wieruchów", "telefon": "+48606480359", "email": "biuro@molos.com.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "F-TOYS": {"magazyn": "F-Toys", "import": "hurtownia", "zrodlo": "Hurtownia F-Toys", "kurier": {"osoba": "Plug & Play sp. z o.o.", "firma": "Plug & Play sp. z o.o.", "ulica": "Warszawska 4", "kod": "96-515", "miasto": "Seroki-Parcela", "telefon": "+48791996677", "email": "ftoys@ftoys.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": true}, "PRZEMYSŁOWA": {"magazyn": "Hurtownia Przemysłowa", "import": "baseconnect", "zrodlo": "Hurtownia Przemysłowa", "kurier": {"osoba": "Global Service Group Paweł Kapustka", "firma": "Global Service Group Paweł Kapustka", "ulica": "Giżycka 2", "kod": "65-548", "miasto": "Zielona Góra", "telefon": "+48683817000", "email": "kontakt@hurtowniaprzemyslowa.pl"}, "aliasy": ["PRZEMYSLOWA", "HURTOWNIA PRZEMYSŁOWA"], "czasWysylki": "48h", "zawszePaczkomat": false}, "BIZANTI": {"magazyn": "HURT BISANTI", "import": "baseconnect", "zrodlo": "BISANTI", "kurier": {"osoba": "PHU GERMAN", "firma": "PHU GERMAN", "ulica": "Bielska 103", "kod": "43-400", "miasto": "Cieszyn", "telefon": "+48577033555", "email": "info@bisanti.pl"}, "aliasy": ["BISANTI"], "czasWysylki": "24h", "zawszePaczkomat": false}, "LEAN": {"magazyn": "LEAN TOYS", "import": "hurtownia", "zrodlo": "Hurtownia LEAN TOYS", "kurier": {"osoba": "Magazyn LeanToys", "firma": "F.H. LEAN", "ulica": "Obrońców Poczty Gdańskiej 95", "kod": "42-400", "miasto": "Zawiercie", "telefon": "+48884877700", "email": "zamowienia@leantoys.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false, "uzyte": [{"sklep": "LEAN-1", "mnoznik": 1.51, "zdjecie": 3}, {"sklep": "LEAN-3", "mnoznik": 1.74, "zdjecie": 4}, {"sklep": "LEAN-4", "mnoznik": 1.93, "zdjecie": 5}, {"sklep": "LEAN-5", "mnoznik": 1.21, "zdjecie": 6}], "maxZdjecie": 11, "maxMnoznik": 1.99}, "VILDE": {"magazyn": "Vilde", "import": "baseconnect", "zrodlo": "Vilde", "kurier": {"osoba": "Grupa Orion Sp. z o.o.", "firma": "Grupa Orion Sp. z o.o.", "ulica": "Wiejska 49", "kod": "41-253", "miasto": "Czeladź", "telefon": "+48322014082", "email": "info@vilde.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false, "uzyte": [{"sklep": "stolipol", "mnoznik": 1.64, "zdjecie": 4}, {"sklep": "BengerV", "mnoznik": 1.31, "zdjecie": 5}, {"sklep": "milan", "mnoznik": 1.86, "zdjecie": 6}, {"sklep": "PierwszaPotrzeba", "mnoznik": 2.12, "zdjecie": 2}, {"sklep": "NaszSklepik", "mnoznik": 2.43, "zdjecie": 7}, {"sklep": "Nelior", "mnoznik": 2.81, "zdjecie": 8}, {"sklep": "KubkiGarnki", "mnoznik": 1.75, "zdjecie": 9}, {"sklep": "sususklep", "mnoznik": 1.21, "zdjecie": 10}, {"sklep": "gosposiav", "mnoznik": 1.5, "zdjecie": 11}], "maxZdjecie": 11}, "JUMI": {"magazyn": "JUMI", "import": "baseconnect", "zrodlo": "JUMI", "kurier": {"osoba": "JUMI", "firma": "JUMI", "ulica": "Myśliwska 34A", "kod": "95-200", "miasto": "Pabianice", "telefon": "+48422254800", "email": "Info@jumi.com.pl"}, "aliasy": [], "czasWysylki": "48h", "zawszePaczkomat": false}, "GERMAN": {"warunkiNazwa": "AH GERMAN", "magazyn": "GERMAN HURT", "import": "baseconnect", "zrodlo": "GERMAN HURT", "kurier": {"osoba": "GERMAN Sp. z o.o.", "firma": "GERMAN Sp. z o.o.", "ulica": "Kwiatów Polnych 11", "kod": "22-400", "miasto": "Zamość", "telefon": "+48500564777", "email": "sklep@german.com.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "K2": {"magazyn": "K2distribution", "import": "baseconnect", "zrodlo": "K2distribution", "kurier": {"osoba": "Magazyn K2distribution", "firma": "Magazyn K2distribution", "ulica": "H. Sienkiewicza 46 / D12", "kod": "41-800", "miasto": "Zabrze", "telefon": "+48885777091", "email": "b2b@k2distribution.eu"}, "aliasy": [], "czasWysylki": "3d", "zawszePaczkomat": false}, "ERO HUR": {"magazyn": "EroHurtownia.pl", "import": "baseconnect", "zrodlo": "EroHurtownia.pl", "kurier": {"osoba": "HOLDING Sp. z o.o.", "firma": "HOLDING Sp. z o.o.", "ulica": "Świeradowska 47", "kod": "02-662", "miasto": "Warszawa", "telefon": "+48223905858", "email": "biuro@holdinghandlowy.pl"}, "aliasy": ["ERO HURT", "EROHURT", "HOLDING"], "czasWysylki": "24h", "zawszePaczkomat": true}, "BIO KOMINKI": {"magazyn": "Bio Kominki", "import": "baseconnect", "zrodlo": "Bio Kominki", "kurier": {"osoba": "BIO KOMINKI GTM", "firma": "BIO KOMINKI GTM", "ulica": "DWORCOWA 56", "kod": "76-004", "miasto": "Sianów", "telefon": "+48570980028", "email": "producent@biokominkigmt.pl"}, "aliasy": ["BIOKOMINKI"], "czasWysylki": "24h", "zawszePaczkomat": false}, "FURNITEX": {"magazyn": "FURNITEX", "import": "baseconnect", "zrodlo": "FURNITEX", "kurier": {"osoba": "Radosław Roszak", "firma": "FURNITEX Radosław Roszak & Adrian Roszak", "ulica": "Przemysłowa 85", "kod": "62-510", "miasto": "Konin", "telefon": "+48608357848", "email": "adrian.roszak@furnitex.pl"}, "aliasy": [], "czasWysylki": "24h", "zawszePaczkomat": false}, "ERO PLACE": {"magazyn": "BaseLinker Connect Eroplace.pl", "import": "baseconnect", "zrodlo": "BaseLinker Connect Eroplace.pl", "kurier": {"osoba": "ERO PLACE 2.0", "firma": "ERO PLACE 2.0", "ulica": "ul. Brzezina 18", "kod": "44-177", "miasto": "Chudów", "telefon": "+48669230967", "email": "hurtownia@eroplace.pl"}, "aliasy": [], "czasWysylki": "3d", "zawszePaczkomat": true}, "EROTIZO": {"magazyn": "Erotizo", "zrodlo": "Hurtownia Erotizo", "import": "hurtownia", "aliasy": ["EROTIZO.PL"], "kurier": {"osoba": "EROTIZO.PL", "firma": "EROTIZO.PL", "ulica": "Energetyków 23a lok. 94b", "kod": "20-468", "miasto": "Lublin", "telefon": "", "email": "kontakt@erotizo.pl"}, "czasWysylki": "3d", "zawszePaczkomat": true}, "STAVIORI": {"magazyn": "Staviori", "zrodlo": "Staviori", "import": "baseconnect", "aliasy": [], "kurier": {"osoba": "STAVIORI", "firma": "STAVIORI", "ulica": "Jeleniogórska 16", "kod": "60-179", "miasto": "POZNAŃ", "telefon": "+48500744070", "email": "b2b@staviori.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}, "HOME DESIGN": {"magazyn": "Home Design", "zrodlo": "Home Design", "import": "baseconnect", "aliasy": [], "kurier": {"osoba": "Home Design Sylwia Stefańska Sp.k", "firma": "Home Design Sylwia Stefańska Sp.k", "ulica": "Piłsudskiego 72", "kod": "10-450", "miasto": "Olsztyn", "telefon": "+48223574246", "email": "sklep@ubieramy-meble.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}, "SKLEP TECHNICZNY": {"magazyn": "Skleptechniczny", "zrodlo": "Skleptechniczny", "import": "baseconnect", "aliasy": ["KASTOR", "SKLEPTECHNICZNY"], "kurier": {"osoba": "FIRMA KASTOR WACŁAW WIECHA", "firma": "FIRMA KASTOR WACŁAW WIECHA", "ulica": "Solidarności 10", "kod": "32-800", "miasto": "Brzeska", "telefon": "+48668010255", "email": "skleptechniczny@skleptechniczny.pl"}, "czasWysylki": "24h", "zawszePaczkomat": false}}, "hist": [{"sklep": "IntimoStyl", "hurtownia": "F-TOYS", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "VelveaShop", "hurtownia": "F-TOYS", "nr": 1, "mnoznik": 1.45, "zdjecie": 5}, {"sklep": "RubyNightPL", "hurtownia": "F-TOYS", "nr": 2, "mnoznik": 1.35, "zdjecie": 2}, {"sklep": "DiscretoPL", "hurtownia": "F-TOYS", "nr": 3, "mnoznik": 2.31, "zdjecie": 3}, {"sklep": "NocnyButik", "hurtownia": "ERO HUR", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "ProfiPrzemysl", "hurtownia": "GERMAN", "nr": 1, "mnoznik": null, "zdjecie": null}, {"sklep": "DomowyKlimat", "hurtownia": "VILDE", "nr": 1, "mnoznik": 1.4, "zdjecie": 3}, {"sklep": "HomeStylPL", "hurtownia": "VILDE", "nr": 2, "mnoznik": 1.57, "zdjecie": 7}, {"sklep": "KuchniaDeco", "hurtownia": "VILDE", "nr": 3, "mnoznik": 1.98, "zdjecie": 10}, {"sklep": "WnetrzaPlus", "hurtownia": "VILDE", "nr": 4, "mnoznik": 2.27, "zdjecie": 5}, {"sklep": "CozyDom", "hurtownia": "VILDE", "nr": 5, "mnoznik": 1.15, "zdjecie": 8}, {"sklep": "PorzadekWDomuPL", "hurtownia": "VILDE", "nr": 6, "mnoznik": 2.62, "zdjecie": 9}, {"sklep": "KlockoweCentrum", "hurtownia": "LEAN", "nr": 1, "mnoznik": 1.33, "zdjecie": 2}, {"sklep": "PlacZabawPL", "hurtownia": "LEAN", "nr": 2, "mnoznik": 1.86, "zdjecie": 2}, {"sklep": "MisiowyKacik", "hurtownia": "LEAN", "nr": 3, "mnoznik": 1.12, "zdjecie": 3}, {"sklep": "ToyBazarPL", "hurtownia": "LEAN", "nr": 4, "mnoznik": 1.4, "zdjecie": 4}, {"sklep": "KreatywnyMaluch", "hurtownia": "LEAN", "nr": 5, "mnoznik": 1.62, "zdjecie": 5}, {"sklep": "ZabawkiTuTek", "hurtownia": "LEAN", "nr": 6, "mnoznik": 1.68, "zdjecie": 6}, {"sklep": "BajkowyStore", "hurtownia": "LEAN", "nr": 7, "mnoznik": 1.27, "zdjecie": 5}, {"sklep": "RadosnaJutka", "hurtownia": "LEAN", "nr": 8, "mnoznik": 1.06, "zdjecie": 4}]};
   const NADAWCA = { sender_name: 'TENEMONT SP. Z O.O.', sender_person: 'TENEMONT SP. Z O.O.', sender_address: 'Jana Brzechwy 2', sender_zipcode: '60-195', sender_city: 'POZNAŃ', sender_phone: '+48885777091', sender_email: 'tenemontsklep@gmail.com' };
   const WZA_WYBORY = { sender_country_code: 'Polska', pickup_country_code: 'Polska', printout_type: 'PDF', printout_format: 'A6', package_description: 'Login kupującego', reference_number: 'ID zamówienia',
     clean_reference_number: 'Tak', trim_long_address: 'Utnij powyżej limitu znaków dla danego przewoźnika', package_type: 'Paczka',
@@ -43,7 +46,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik', L_AD = 'nsAdres', L_AD_W = 'nsAdresWynik';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; if (!localStorage.getItem('nsMigrMax218')) { for (const [k, v] of Object.entries(h)) { if (k === 'LEAN') { if (!v.maxMnoznik) v.maxMnoznik = 1.99; } else if (!v.maxMnoznik || +v.maxMnoznik === 1.99) v.maxMnoznik = MAX_MNOZNIK; } pisz(L_H, h); localStorage.setItem('nsMigrMax218', '1'); } if (h.GERMAN && !h.GERMAN.warunkiNazwa && !localStorage.getItem('nsMigrGermanWar')) { h.GERMAN.warunkiNazwa = 'AH GERMAN'; pisz(L_H, h); localStorage.setItem('nsMigrGermanWar', '1'); } return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -180,16 +183,18 @@
     let stan = 'gotowy';
     const zmOs = czytaj(L_OS, null);
     const zmPb = czytaj(L_PB, null);
+    const zmAd = czytaj(L_AD, null);
     const ost = !z && czytaj(L_OST, null);
     if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${btn('ns-adres', '📍', '#1565c0')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmPb ? '<div style="margin-top:5px;padding:5px;background:#004d40;border-radius:6px">⏱ Pobieranie co 1 min: ' + Math.min(zmPb.i, zmPb.lista.length) + '/' + zmPb.lista.length + (zmPb.lista[zmPb.i] ? ' · teraz: ' + esc(String(zmPb.lista[zmPb.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-pobier-stop', '⏹', '#c62828') + '</div>' : ''}
+      ${zmAd ? '<div style="margin-top:5px;padding:5px;background:#0d47a1;border-radius:6px">📍 Adres magazynu (' + esc(zmAd.d.klucz) + '): ' + Math.min(zmAd.i, zmAd.lista.length) + '/' + zmAd.lista.length + (zmAd.lista[zmAd.i] ? ' · teraz: ' + esc(String(zmAd.lista[zmAd.i].nazwa).slice(0, 40)) : '') + ' ' + btn('ns-adres-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
@@ -201,6 +206,8 @@
     const os = panel.querySelector('#ns-osoba-stop'); if (os) os.onclick = () => { const j = czytaj(L_OS, null); if (j) { j.stop = true; pisz(L_OS, j); log('👤 zatrzymuję zmianę osoby…'); } };
     panel.querySelector('#ns-pobier').onclick = () => { const w = czytaj(L_PB_W, null); if (w && !czytaj(L_PB, null) && confirm('Pokazać wynik ostatniego ustawiania pobierania co 1 min?\n(Anuluj = zacznij od nowa)')) return oknoPobieranieWynik(); startPobieranie(); };
     const pb = panel.querySelector('#ns-pobier-stop'); if (pb) pb.onclick = () => { const j = czytaj(L_PB, null); if (j) { j.stop = true; pisz(L_PB, j); log('⏱ zatrzymuję ustawianie pobierania…'); } };
+    panel.querySelector('#ns-adres').onclick = () => { const w = czytaj(L_AD_W, null); if (w && !czytaj(L_AD, null) && confirm('Pokazać wynik ostatniej zmiany adresu magazynu?\n(Anuluj = zacznij nową zmianę)')) return oknoAdresWynik(); startAdres(); };
+    const ad = panel.querySelector('#ns-adres-stop'); if (ad) ad.onclick = () => { const j = czytaj(L_AD, null); if (j) { j.stop = true; pisz(L_AD, j); log('📍 zatrzymuję zmianę adresu…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
     const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
@@ -1177,6 +1184,192 @@
     const pw = o.querySelector('#pb-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startPobieranie([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, sklep }) => ({ id, sklep })), ...j.lista.filter(x => !zrob.has(x.id))]); };
   }
 
+  // =====================================================================
+  // 📍 ZMIANA ADRESU ODBIORU (magazyn hurtowni) we wszystkich „Wysyłam z Allegro”
+  //    Zmienia TYLKO pola odbioru (pickup_*). Nadawcy (sender_*) ani niczego innego nie rusza.
+  // =====================================================================
+  const AD_POLA = [['ulica', 'pickup_street', 'ulica i nr'], ['kod', 'pickup_zipcode', 'kod'], ['miasto', 'pickup_city', 'miasto'],
+                   ['firma', 'pickup_company', 'firma'], ['osoba', 'pickup_name', 'osoba kontaktowa'], ['telefon', 'pickup_phone', 'telefon'], ['email', 'pickup_email', 'e-mail']];
+  // podpowiedzi nowych adresów (po zmianie magazynu przez hurtownię) – wpisują się same w oknie
+  const ADRES_PODPOWIEDZ = { 'PRZEMYSŁOWA': { ulica: 'Giżycka 2', kod: '65-548', miasto: 'Zielona Góra', od: '19.10.2026',
+                                              stare: { ulica: 'Urszuli 17', kod: '65-147', miasto: 'Zielona Góra' } } };
+  const adrTekst = k => [k.ulica, k.kod, k.miasto].filter(Boolean).join(', ');
+  const bezUl = t => String(t || '').replace(/^\s*(ul\.?|ulica|al\.?|aleja|os\.?|osiedle|pl\.?|plac)\s+/i, '');   // „ul. Giżycka 2” = „Giżycka 2”
+  const rowneAd = (k, a, b) => k === 'telefon' ? String(a || '').replace(/\D/g, '').slice(-9) === String(b || '').replace(/\D/g, '').slice(-9)
+                             : k === 'ulica' ? nn(bezUl(a)) === nn(bezUl(b)) : nn(a) === nn(b);
+  // „stary” adres = ten z danych hurtowni; a jeśli dane hurtowni są już po zmianie – ten z podpowiedzi (żeby dało się dojechać resztę integracji)
+  const staryAdres = klucz => {
+    const k = ((hurtownie()[klucz] || {}).kurier) || {}, p = ADRES_PODPOWIEDZ[klucz] || {};
+    const baza = Object.fromEntries(AD_POLA.map(([f]) => [f, k[f] || '']));
+    return (p.stare && p.ulica && rowneAd('ulica', baza.ulica, p.ulica)) ? Object.assign({}, baza, p.stare) : baza;
+  };
+
+  // integracje WzA należące do hurtowni (po nazwie integracji: „HURTOWNIA AUTOMATIC PRZE-n Sklep”)
+  function wzaHurtowni(klucz) {
+    const h = hurtownie()[klucz] || {}, nazwy = [klucz, ...(h.aliasy || [])].map(nn).filter(Boolean);
+    return wszystkieWza().filter(w => { const przed = nn(String(w.nazwa).split(/AUTOMATIC/i)[0] || w.nazwa); return nazwy.some(x => przed.includes(x)); });
+  }
+
+  function oknoAdres() {
+    const H = hurtownie(), klucze = Object.keys(H);
+    document.querySelectorAll('.ns-ad-okno').forEach(x => x.remove());
+    let klucz = ADRES_PODPOWIEDZ[klucze.find(k => ADRES_PODPOWIEDZ[k])] ? klucze.find(k => ADRES_PODPOWIEDZ[k]) : klucze[0];
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:8px">📍 Zmiana adresu magazynu we wszystkich „Wysyłam z Allegro”</div>
+      <div style="margin-bottom:10px">Hurtownia: <select id="ad-h" style="${pole}">${klucze.map(k => `<option ${k === klucz ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+        <span id="ad-ile" style="margin-left:10px;opacity:.85"></span></div>
+      <div id="ad-tab"></div>
+      <label style="display:block;margin-top:10px"><input type="checkbox" id="ad-tylko" checked> zmieniaj tylko tam, gdzie jest <b>stary</b> adres (resztę pokaż w podsumowaniu i zostaw)</label>
+      <label style="display:block;margin-top:4px"><input type="checkbox" id="ad-wszystkie"> przeskanuj <b>wszystkie</b> integracje „Wysyłam z Allegro” (nie tylko tej hurtowni) – wolniej, ale wyłapie też inaczej nazwane</label>
+      <label style="display:block;margin-top:4px"><input type="checkbox" id="ad-zapisz" checked> zapisz nowy adres w danych hurtowni 🏭 (nowe sklepy dostaną już nowy)</label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button id="ad-start" style="${przycisk('#1565c0')}">▶ Start</button>
+        <button id="ad-zamknij" style="${przycisk('#555')}">Anuluj</button></div>`);
+    o.classList.add('ns-ad-okno');
+    const rysuj = () => {
+      klucz = o.querySelector('#ad-h').value;
+      const k = staryAdres(klucz), p = ADRES_PODPOWIEDZ[klucz] || {};
+      o.querySelector('#ad-tab').innerHTML = `<table style="width:100%;border-collapse:collapse">
+        <tr style="opacity:.7"><th style="text-align:left;padding:3px">pole</th><th style="text-align:left;padding:3px">jest teraz (stare)</th><th style="text-align:left;padding:3px">ma być (nowe)</th></tr>
+        ${AD_POLA.map(([f, , n]) => `<tr><td style="padding:3px">${n}</td><td style="padding:3px;opacity:.75">${esc(k[f] || '')}</td>
+          <td style="padding:3px"><input data-ad="${f}" value="${esc(p[f] != null ? p[f] : (k[f] || ''))}" style="${pole};width:100%"></td></tr>`).join('')}</table>
+        ${p.od ? '<div style="margin-top:6px;color:#ffb74d">Hurtownia podała nowy magazyn od ' + esc(p.od) + '</div>' : ''}`;
+      const n = o.querySelector('#ad-wszystkie').checked ? wszystkieWza().length : wzaHurtowni(klucz).length;
+      o.querySelector('#ad-ile').innerHTML = o.querySelector('#ad-wszystkie').checked
+        ? 'wszystkich integracji WzA na liście: <b>' + n + '</b>'
+        : 'integracji tej hurtowni na liście: <b>' + n + '</b>';
+    };
+    o.querySelector('#ad-h').onchange = rysuj;
+    o.querySelector('#ad-wszystkie').onchange = rysuj;
+    rysuj();
+    o.querySelector('#ad-zamknij').onclick = () => o.remove();
+    o.querySelector('#ad-start').onclick = () => {
+      const stary = staryAdres(klucz);
+      const nowy = Object.fromEntries([...o.querySelectorAll('[data-ad]')].map(i => [i.dataset.ad, i.value.trim()]));
+      const zmieniane = AD_POLA.map(([f]) => f).filter(f => nowy[f] && !rowneAd(f, nowy[f], stary[f]));
+      if (!zmieniane.length) return alert('Nic nie zmieniłeś – nowe wartości są takie same jak stare.');
+      if (!nowy.ulica || !nowy.kod || !nowy.miasto) return alert('Ulica, kod i miasto nie mogą być puste.');
+      const lista = o.querySelector('#ad-wszystkie').checked ? wszystkieWza() : wzaHurtowni(klucz);
+      if (!lista.length) return alert('Nie widzę żadnej integracji „Wysyłam z Allegro” do zmiany.');
+      const d = { klucz, stary, nowy, zmieniane, tylkoStary: o.querySelector('#ad-tylko').checked, zapiszHurt: o.querySelector('#ad-zapisz').checked };
+      if (!confirm('Zmienić dane odbioru w integracjach „Wysyłam z Allegro”: ' + lista.length + ' (' + klucz + ')\n\n'
+        + zmieniane.map(f => '• ' + (AD_POLA.find(x => x[0] === f) || [])[2] + ': „' + stary[f] + '” → „' + nowy[f] + '”').join('\n')
+        + (d.tylkoStary ? '\n\nTylko tam, gdzie jest stary adres. Inne zostawia i pokaże w podsumowaniu.' : '\n\nUWAGA: nadpisze też tam, gdzie adres jest inny niż stary!')
+        + '\nNadawcy (Tenemont) ani niczego innego nie rusza. Strony nie przełączaj w trakcie.')) return;
+      o.remove();
+      if (d.zapiszHurt) {
+        const HH = hurtownie(); HH[klucz] = HH[klucz] || {}; HH[klucz].kurier = Object.assign({}, HH[klucz].kurier || {}, Object.fromEntries(zmieniane.map(f => [f, nowy[f]])));
+        pisz(L_H, HH); log('📍 zapisane w danych hurtowni ' + klucz + ': ' + adrTekst(nowy));
+      }
+      pisz(L_AD, { lista, i: 0, wyniki: [], d, start: Date.now(), host: location.host });
+      log('📍 START zmiany adresu (' + klucz + '): ' + lista.length + ' integracji');
+      rysujPanel(); adresBieg();
+    };
+  }
+
+  async function startAdres(lista) {
+    if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
+    if (czytaj(L_OS, null)) return alert('Trwa zmiana osoby kontaktowej – poczekaj, aż skończy.');
+    if (czytaj(L_PB, null)) return alert('Trwa ustawianie pobierania co 1 min – poczekaj, aż skończy.');
+    const stare = czytaj(L_AD, null);
+    if (stare) {
+      if (adPracuje) return alert('Zmiana adresu właśnie leci w tej karcie – zobacz panel.');
+      const ile = Math.min(stare.i, stare.lista.length) + '/' + stare.lista.length;
+      if (confirm('Jest niedokończona zmiana adresu (' + ile + ') – pewnie przerwana (inne konto Base, zamknięta karta).\n\nOK = dokończ od ' + ile + '\nAnuluj = wyczyść i zacznij od nowa')) {
+        log('📍 wznawiam niedokończoną zmianę adresu: ' + ile); rysujPanel(); return adresBieg();
+      }
+      localStorage.removeItem(L_AD); localStorage.removeItem('nsAdresStart'); log('📍 wyczyszczone niedokończone zadanie'); rysujPanel();
+    }
+    if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsAdresStart', '1'); log('📍 przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
+    if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
+    await czekaj(1000);
+    if (lista && lista.length) {                           // powtórka błędów z podsumowania
+      const w = czytaj(L_AD_W, null); if (!w) return alert('Brak danych poprzedniej zmiany');
+      pisz(L_AD, { lista, i: 0, wyniki: [], d: w.d, start: Date.now(), host: location.host });
+      log('📍 powtórka: ' + lista.length + ' integracji'); rysujPanel(); return adresBieg();
+    }
+    oknoAdres();
+  }
+  let adPracuje = false;
+  async function adresBieg() {
+    if (adPracuje) return; adPracuje = true; bezOkienek();
+    try {
+      if (!await czekajNaFunkcje('openIntegrationSettings')) { log('📍 nie wczytała się lista integracji – odśwież stronę'); return; }
+      await czekaj(1500);
+      for (;;) {
+        const j = czytaj(L_AD, null); if (!j) return;
+        if (j.stop || j.i >= j.lista.length) break;
+        const it = j.lista[j.i];
+        let wyn;
+        try { wyn = await zmienAdresJednej(it, j.d); } catch (e) { wyn = { stan: 'blad', info: 'błąd: ' + (e && e.message || e) }; }
+        const j2 = czytaj(L_AD, null); if (!j2) return;
+        j2.wyniki.push({ ...it, ...wyn }); j2.i++; pisz(L_AD, j2);
+        log('📍 ' + (wyn.stan === 'zmienione' ? '✔' : wyn.stan === 'blad' ? '❌' : '·') + ' ' + it.nazwa.slice(0, 50) + ' – ' + (wyn.info || wyn.stan));
+        rysujPanel();
+      }
+      const j = czytaj(L_AD, null); if (!j) return;
+      await zamknijModal();
+      pisz(L_AD_W, { ...j, koniec: Date.now() }); localStorage.removeItem(L_AD);
+      const ile = st => j.wyniki.filter(w => w.stan === st).length;
+      log('📍 KONIEC: zmienione ' + ile('zmienione') + ', już było ' + ile('juz') + ', inny adres ' + ile('inna') + ', błędy ' + ile('blad') + (j.stop ? ' (zatrzymane)' : ''));
+      powiadom('Adres magazynu WzA – koniec', 'zmienione ' + ile('zmienione') + ', błędy ' + ile('blad'), ile('blad') ? 4 : 3);
+      rysujPanel(); oknoAdresWynik();
+    } finally { adPracuje = false; }
+  }
+  async function zmienAdresJednej(it, d) {
+    let m = null;
+    const otworz = async () => {
+      await zamknijModal(); await czekaj(500);
+      W.openIntegrationSettings('allegrokurier', it.id);
+      const x = await czekajNa(oknoWza, 30000); await czekaj(1500);
+      m = x && x.querySelector('[id="pickup_street"]') ? x : null;
+      return m;
+    };
+    const czytajPola = () => Object.fromEntries(AD_POLA.map(([f, id]) => [f, ((m && m.querySelector('[id="' + id + '"]')) || {}).value || '']));
+    if (!await otworz()) { await zamknijModal(); return { stan: 'blad', info: 'nie otworzyło się okno Wysyłam z Allegro (z adresem odbioru)' }; }
+    let teraz = czytajPola();
+    const bylo = adrTekst(teraz);
+    const taki = a => rowneAd('ulica', a.ulica, teraz.ulica) && rowneAd('miasto', a.miasto, teraz.miasto);
+    if (d.zmieniane.every(f => rowneAd(f, teraz[f], d.nowy[f]))) { await zamknijModal(); return { stan: 'juz', info: 'już było ' + adrTekst(d.nowy) }; }
+    if (d.tylkoStary && !taki(d.stary)) { await zamknijModal(); return { stan: 'inna', info: 'inny adres: „' + bylo + '” – nie ruszam' }; }
+    const el0 = m.querySelector('[id="pickup_street"]'), f0 = el0.closest('form');
+    const pane = el0.closest('.tab-pane, [role=tabpanel]');
+    if (pane && pane.id && !widoczny(el0)) { const a = m.querySelector('a[href="#' + pane.id + '"], [data-target="#' + pane.id + '"], [data-bs-target="#' + pane.id + '"]'); if (a) a.click(); await czekaj(700); }
+    const braki = [];
+    for (const f of d.zmieniane) {
+      const id = (AD_POLA.find(x => x[0] === f) || [])[1], el = id && m.querySelector('[id="' + id + '"]');
+      if (!el) { braki.push(id || f); continue; }
+      el.value = f === 'telefon' ? telefon(d.nowy[f]) : d.nowy[f]; zmien(el);
+    }
+    if (braki.length === d.zmieniane.length) { await zamknijModal(); return { stan: 'blad', info: 'brak pól: ' + braki.join(', ') }; }
+    const zap = f0 && [...f0.querySelectorAll('button, input[type=submit], input[type=button], a.btn')].find(x => /^\s*Zapisz\s*$/i.test(x.textContent || x.value));
+    if (!zap) { await zamknijModal(); return { stan: 'blad', info: 'brak przycisku Zapisz' }; }
+    zap.click(); await czekaj(4000);
+    if (!await otworz()) return { stan: 'blad', info: 'nie otworzyło się okno do sprawdzenia' };
+    teraz = czytajPola();
+    const zle = d.zmieniane.filter(f => !rowneAd(f, teraz[f], d.nowy[f]));
+    await zamknijModal();
+    return zle.length ? { stan: 'blad', info: 'po zapisie nie zgadza się: ' + zle.map(f => f + '=„' + teraz[f] + '”').join('; ') + (braki.length ? ' (brak pól: ' + braki.join(', ') + ')' : '') }
+                      : { stan: 'zmienione', info: bylo + ' → ' + adrTekst(d.nowy) };
+  }
+  function oknoAdresWynik() {
+    const j = czytaj(L_AD_W, null); if (!j) return alert('Brak wyniku');
+    document.querySelectorAll('.ns-adw-okno').forEach(x => x.remove());
+    const kol = { zmienione: ['✅', 'zmienione', '#7ee2a8'], juz: ['✔', 'już było', '#90caf9'], inna: ['➖', 'inny adres – nie ruszone', '#ffb74d'], blad: ['❌', 'błąd', '#ff8a87'] };
+    const ile = st => j.wyniki.filter(w => w.stan === st).length;
+    const reszta = j.lista.length - j.wyniki.length;
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">📍 Adres magazynu „Wysyłam z Allegro” (${esc(j.d.klucz)}) – podsumowanie${j.stop ? ' <span style="color:#ffb74d">(zatrzymane)</span>' : ''}</div>
+      <div style="margin-bottom:8px;opacity:.85">${esc(adrTekst(j.d.stary))} → <b>${esc(adrTekst(j.d.nowy))}</b></div>
+      <div style="margin-bottom:10px">${Object.entries(kol).map(([k, [i, t, c]]) => '<span style="color:' + c + ';margin-right:14px">' + i + ' ' + t + ': <b>' + ile(k) + '</b></span>').join('')}${reszta ? '<span style="opacity:.7">· nie sprawdzone: ' + reszta + '</span>' : ''}</div>
+      <div style="max-height:55vh;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Menlo,monospace">
+        ${j.wyniki.slice().sort((a, b) => ['blad', 'inna', 'zmienione', 'juz'].indexOf(a.stan) - ['blad', 'inna', 'zmienione', 'juz'].indexOf(b.stan)).map(w => '<div>' + kol[w.stan][0] + ' ' + esc(w.nazwa) + ' <span style="color:' + kol[w.stan][2] + '">– ' + esc(w.info || '') + '</span></div>').join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        ${ile('blad') || reszta ? `<button id="adw-powt" style="${przycisk('#6a1b9a')}">🔁 Powtórz błędy${reszta ? ' + nie sprawdzone' : ''}</button>` : ''}
+        <button id="adw-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-adw-okno');
+    o.querySelector('#adw-zamknij').onclick = () => o.remove();
+    const pw = o.querySelector('#adw-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startAdres([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, nazwa }) => ({ id, nazwa })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
   // 🔎 zrzut mapowania wagi dla Claude (strona Parametry Allegro katalogu)
   function zrzutWagi() {
     const skr = (t, n = 2500) => String(t || '').replace(/\s+/g, ' ').slice(0, n);
@@ -1205,5 +1398,9 @@
   if (pbZap && naStronie('/list_integrations.php') && (!pbZap.host || pbZap.host === location.host)) setTimeout(pobieranieBieg, 2500);
   else if (pbZap && pbZap.host && pbZap.host !== location.host) log('⏱ niedokończone zadanie jest z ' + pbZap.host + ' – tutaj nie wznawiam');
   else if (localStorage.getItem('nsPobierStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsPobierStart'); setTimeout(() => startPobieranie(), 2500); }
+  const adZap = czytaj(L_AD, null);
+  if (adZap && naStronie('/list_integrations.php') && (!adZap.host || adZap.host === location.host)) setTimeout(adresBieg, 2500);
+  else if (adZap && adZap.host && adZap.host !== location.host) log('📍 niedokończona zmiana adresu jest z ' + adZap.host + ' – tutaj nie wznawiam');
+  else if (localStorage.getItem('nsAdresStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsAdresStart'); setTimeout(() => startAdres(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
