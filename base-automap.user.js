@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-5
+// @version      2026.10.21-6
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -585,7 +585,7 @@
     location.reload();
   }, 'Który proces: PRZERÓBKI czy FINALNE (każdy ma swoje kroki i swój spis wysłanych)');
   bTel = btn('📱', '#455a64', () => pokazTelefon(), 'Powiadomienia i sterowanie z telefonu');
-  const bKroki = btn('⚙️ Kroki' + (procesKlucz() === 'przerobki' && lsGet('autoBezOferty') === '1' ? ' · 🔁 bez oferty' : '') + (lsGet('autoTylkoZEan') === '1' ? ' · 🏷 z EAN' : ''), '#5d4037', () => pokazKroki(), 'Wybierz, które parametry ma robić (profile: ERO, PRZEMYSŁOWA…)');
+  const bKroki = btn('⚙️ Kroki' + (procesKlucz() === 'przerobki' && lsGet('autoBezOferty') === '1' ? ' · 🔁 bez oferty' : '') + (lsGet('autoTylkoZEan') === '1' ? ' · 🏷 z EAN' : '') + (lsGet('autoIgnorujBledy') === '1' ? ' · 🙈 mimo błędów' : ''), '#5d4037', () => pokazKroki(), 'Wybierz, które parametry ma robić (profile: ERO, PRZEMYSŁOWA…)');
   const bLive = btn('📺', '#0277bd', pokazLive, 'Podgląd na żywo: co skrypt robi teraz, kroki, czasy i log (ze wszystkich kart)');
   const bKolejka = btn('🗂', '#00695c', () => pokazKolejke(), 'Kolejka katalogów: bot sam przechodzi z katalogu na katalog');
   panelUI.append(bProces, bKroki, bTryb, bRozmiar, bSpis, bRaport, bStaty, bLive, bTel, bKolejka);
@@ -663,6 +663,8 @@
           <span><b>PRZERÓBKI: Marketplace (oferta) NIE zawiera dowolnego konta</b> – bierze tylko produkty bez oferty, także te ze spisu (np. paczka, która się nie wystawiła). Każdy produkt najwyżej raz na katalog – błędne i niedopasowane nie wracają w kółko. Po naprawie odznacz.</span></label>
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-top:8px"><input type="checkbox" id="kr-zean" ${lsGet('autoTylkoZEan') === '1' ? 'checked' : ''} style="margin-top:3px">
           <span><b>Tylko produkty z EAN</b> (obie: przeróbki i finalne) – filtr zaawansowany: EAN · wartość nie pusta. Dla hurtowni, gdzie nie wszystkie produkty mają EAN.</span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-top:8px"><input type="checkbox" id="kr-ignorbledy" ${lsGet('autoIgnorujBledy') === '1' ? 'checked' : ''} style="margin-top:3px">
+          <span><b>🙈 Lecę mimo błędów</b> – nie zatrzymuj cyklu, choćby całe paczki były błędne (dokańczanie sklepu). Błędne lądują w spisie 📋, żeby nie wracały. Limit ofert na konto i blokada pętli dalej działają.</span></label>
         <div style="margin-top:10px;border-top:1px solid #37474f;padding-top:8px"><b>📊 Limit poprawnych ofert na konto</b> (${PROCES.nazwa}): <input id="kr-limit" type="number" min="1000" step="500" value="${limitDobrych()}" style="width:80px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:2px 5px"> – po tylu bot staje i daje znać.
           <div style="font-size:12px;opacity:.8;margin:4px 0">Liczone tylko poprawnie wystawione (nie spis). Liczniki możesz poprawić (np. wpisać, ile konto już ma) albo wyzerować:</div>
           <div id="kr-liczniki" style="max-height:140px;overflow:auto;font-size:12.5px">${Object.entries(dobreKonto()).filter(([k]) => k.startsWith(procesKlucz() + '|')).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div style="display:flex;gap:6px;align-items:center;margin:2px 0"><span style="flex:1">${k.split('|')[1].replace(/[<>&]/g, '')}</span><input class="kr-licz" data-k="${k.replace(/"/g, '')}" type="number" min="0" value="${v}" style="width:80px;background:#0f1720;color:#fff;border:1px solid #37474f;border-radius:5px;padding:1px 4px"></div>`).join('') || '<span style="opacity:.6">brak – liczy się od teraz</span>'}</div>
@@ -803,6 +805,7 @@
       if ($('#kr-bezoferty').checked && lsGet('autoBezOferty') !== '1') wyczyscSpisyBezOferty();   // nowa runda naprawy
       lsSet('autoBezOferty', $('#kr-bezoferty').checked ? '1' : '0');
       lsSet('autoTylkoZEan', $('#kr-zean').checked ? '1' : '0');
+      lsSet('autoIgnorujBledy', $('#kr-ignorbledy').checked ? '1' : '0');
       { const lim = parseInt($('#kr-limit').value); if (lim > 0) lsSet(L_LIMIT_DOBRYCH, String(lim));
         const d = dobreKonto(); o.querySelectorAll('.kr-licz').forEach(i => { const v = parseInt(i.value); if (isNaN(v) || v <= 0) delete d[i.dataset.k]; else d[i.dataset.k] = v; });
         const nk = $('#kr-licz-konto').value.trim(), ni = parseInt($('#kr-licz-ile').value); if (nk && !isNaN(ni)) d[kluczKonta(nk)] = ni;
@@ -1116,6 +1119,7 @@
     } catch {}
   }
 
+  const ignorujBledy = () => lsGet('autoIgnorujBledy') === '1';     // 🙈 dokańczanie sklepu: leć dalej mimo błędnych paczek
   async function zapiszPoWystawieniu(opcje = {}) {
     if (!opcje.pusta) lsDel('autoNiedopFin');            // paczka coś dopasowała – licznik „cała niedopasowana” od zera
     let oczek = null;
@@ -1162,7 +1166,7 @@
     // paczka, która się NIE wystawiła (0 dobrych i 0 błędnych / brak liczników) – NIE dopisuj do spisu, wróci w następnej paczce
     const nieWyszla = !opcje.pusta && (!liczniki || sentL + errL === 0);
     // 0 dobrych, same błędy – też nie do spisu (niżej: STOP cyklu, żeby nie leciał dalej po paczkach bez wystawiania)
-    const zeroDobrych = !opcje.pusta && !nieWyszla && !!liczniki && sentL === 0;
+    const zeroDobrych = !opcje.pusta && !nieWyszla && !!liczniki && sentL === 0 && !ignorujBledy();
     if (nieWyszla) {
       const niedopIds = idsPrzed.filter(id => !ids.map(String).includes(String(id)));   // tylko faktycznie niedopasowane idą do spisu
       if (niedopIds.length && ids.length) dodajDoSpisu(niedopIds);
@@ -1182,7 +1186,10 @@
     }
     lsSet('autoOstatniaPaczka', JSON.stringify({ kat: katP, ids: zPaczki.map(String).filter(id => !odrzP.has(id)), nieWyszla, t: Date.now() }));   // tylko wczytane – niewczytane mają prawo wrócić
     if (!opcje.pusta && !nieWyszla && liczniki) {         // 0 dobrych (same błędy) → STOP od razu, nie bierzemy kolejnej paczki
-      if (sentL === 0) {
+      if (sentL === 0 && ignorujBledy()) {
+        status('🙈 paczka bez dobrych ofert (błędne ' + errL + ') – lecę mimo błędów, biorę kolejną');
+        powiadom('🙈 Paczka same błędy – lecę dalej', 'wystawione 0, błędne ' + errL + ' z ' + (totL || zPaczki.length) + ' · ' + ((oczek && oczek.konto) || '') + '\nTryb „lecę mimo błędów” – biorę kolejną paczkę.', { priorytet: 3, tagi: ['see_no_evil'] });
+      } else if (sentL === 0) {
         lsDel('autoZeroDobrychLicz');
         zatrzymajCykl('PACZKA BEZ ANI JEDNEJ DOBREJ OFERTY', ((oczek && oczek.konto) || '') + ': wystawione 0, błędne ' + errL + ' z ' + (totL || zPaczki.length) + '. Nie biorę kolejnej paczki. Produkty zostają POZA spisem – wrócą, jak włączysz cykl.');
       } else lsDel('autoZeroDobrychLicz');
@@ -1220,7 +1227,7 @@
     {
       const ost3 = raport.slice(-3);
       const slabe = w => !w.bezWystawienia && (Number(w.probowano) || 0) >= 50 && (Number(w.dobre) || 0) / (Number(w.probowano) || 1) < 0.15;
-      if (ost3.length === 3 && ost3.every(w => w.konto === wpis.konto && slabe(w)) && cyklWlaczony()) {
+      if (ost3.length === 3 && ost3.every(w => w.konto === wpis.konto && slabe(w)) && cyklWlaczony() && !ignorujBledy()) {
         zatrzymajCykl('3 PACZKI Z RZĘDU PONIŻEJ 15%', (wpis.konto || '') + ': trzy paczki pod rząd z bardzo małą liczbą dobrych (' + ost3.map(w => (w.dobre || 0) + '/' + w.probowano).join(', ') + '). Zatrzymałem – sprawdź błędy / niedopasowane w Base.');
       }
     }
