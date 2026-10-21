@@ -520,7 +520,8 @@
       lsDel(L_KATALOG_CZEKA);
       status('zatrzymano – nic nie wystawiam');
     }, 'Zatrzymaj branie paczki');
-    panelUI.append(bPaczka, bStopKat);
+    const bEan = btn('🎯 EAN', '#6a1b9a', () => zapamietajFiltrEan(), 'Ustaw filtr „EAN – wartość nie pusta” ręcznie w Base i kliknij tu – skrypt zapamięta kod pola i operatora');
+    panelUI.append(bPaczka, bStopKat, bEan);
     if (procesKlucz() === 'finalne') {
       // 🏷 grupa tagów: klik = następna (DUŻE → KURIER → PACZKOMAT → bez podziału → DUŻE)
       const bGrupa = btn('', '#5d4037', () => {
@@ -1765,6 +1766,23 @@
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
         return { ok: true, pominietoEan, dane: table_getFiltersData(c) };
+      },
+
+      // aktualne filtry ustawione na ekranie + listy pól/operatorów (do zapamiętania „EAN niepusty”)
+      async zrzutFiltrow() {
+        const c = 'table_inventory_products_container';
+        let dane = [], selecty = [];
+        try { dane = [].concat(...(table_getFiltersData(c) || [])); } catch (e) {}
+        try {
+          const kont = table_getFiltersContainer(c);
+          selecty = [...jQuery(kont).find('select')].slice(0, 16).map(sel => ({
+            name: sel.name || sel.id || '',
+            wybrane: sel.value,
+            wybranyTekst: (sel.selectedOptions && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '').trim(),
+            opcje: [...sel.options].slice(0, 40).map(o => o.value + '=' + (o.textContent || '').trim())
+          }));
+        } catch (e) {}
+        return { dane, selecty, tryb: (() => { try { return String(table_getFilteringMode(c).val()); } catch (e) { return '?'; } })() };
       },
 
       // sprawdź obowiązkowe parametry we wszystkich produktach paczki (nic nie zmienia)
@@ -3604,6 +3622,49 @@
     status((ok ? '✔ EAN = SKU ustawione' : '⚠ EAN = SKU: ' + wynik) + ' – ' + (z.nazwa || ''));
     await czekaj(2000);
     await koniecKatalogu(z.kat, z.nazwa || '');
+  }
+
+  // 🎯 „Zapamiętaj filtr EAN z ekranu”: ustawiasz filtr ręcznie w Base, klikasz – skrypt zapisuje kod pola i operatora
+  async function zapamietajFiltrEan() {
+    status('czytam filtry z ekranu…');
+    const r = await bazaBase('zrzutFiltrow', {}, 30000);
+    const w = r.wynik;
+    if (!w) { alert('Nie udało się odczytać filtrów (' + (r.blad || 'brak odpowiedzi') + ').\nOdśwież stronę katalogu i spróbuj jeszcze raz.'); return; }
+    const esc2 = t => String(t == null ? '' : t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const tekst = JSON.stringify(w, null, 1);
+    const opZ = f => (f.op != null ? f.op : (f.operation != null ? f.operation : f.filterOperation));
+    document.querySelectorAll('.am-ean-okno').forEach(x => x.remove());
+    const o = document.createElement('div');
+    o.className = 'am-ean-okno';
+    o.style.cssText = 'position:fixed;inset:0;z-index:99999999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center';
+    o.innerHTML = '<div style="background:#1e2a38;color:#fff;padding:20px;border-radius:12px;width:min(900px,96vw);max-height:92vh;overflow:auto;font:13px sans-serif">'
+      + '<div style="font-size:17px;font-weight:bold;margin-bottom:6px">🎯 Zapamiętaj filtr „EAN · wartość nie pusta”</div>'
+      + '<div style="opacity:.8;margin-bottom:10px">Ustaw ten filtr ręcznie w katalogu (filtrowanie zaawansowane), kliknij Filtruj, potem wróć tu i kliknij „to ten”. Skrypt zapamięta kod pola i operatora i będzie ustawiał filtr sam.</div>'
+      + (w.dane && w.dane.length
+          ? '<table style="width:100%;border-collapse:collapse">' + w.dane.map((f, i) =>
+              '<tr><td style="padding:4px">' + (i + 1) + '.</td><td style="padding:4px"><b>' + esc2(f.field) + '</b></td><td style="padding:4px">' + esc2(opZ(f)) + '</td>'
+              + '<td style="padding:4px;opacity:.75">' + esc2(JSON.stringify(f.val)).slice(0, 60) + '</td>'
+              + '<td style="padding:4px"><button data-ean="' + i + '" style="background:#2e7d32;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer">to ten</button></td></tr>').join('') + '</table>'
+          : '<div style="color:#ffb74d">Na ekranie nie ma ustawionych filtrów – ustaw filtr EAN w Base i kliknij 🎯 jeszcze raz.</div>')
+      + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">'
+      + '<button id="am-ean-kopiuj" style="background:#6a1b9a;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">📋 Kopiuj zrzut dla Claude</button>'
+      + '<button id="am-ean-zapomnij" style="background:#ef6c00;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">🗑 Zapomnij zapamiętany</button>'
+      + '<button id="am-ean-zamknij" style="background:#555;color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer">Zamknij</button></div>'
+      + '<div style="margin-top:8px;opacity:.6;font-size:11px">zapamiętane: pole „' + esc2(localStorage.getItem('autoPoleEan') || '–') + '”, operator „' + esc2(localStorage.getItem('autoOpNiepusty') || '–') + '”</div></div>';
+    document.body.appendChild(o);
+    o.querySelectorAll('[data-ean]').forEach(b => b.onclick = () => {
+      const f = w.dane[+b.dataset.ean], op = opZ(f);
+      try { localStorage.setItem('autoPoleEan', String(f.field)); localStorage.setItem('autoOpNiepusty', String(op)); } catch (e) {}
+      o.remove();
+      status('zapamiętane: EAN = pole „' + f.field + '”, operator „' + op + '”');
+      alert('Zapamiętane:\npole: ' + f.field + '\noperator: ' + op + '\n\nOd teraz skrypt ustawia filtr „EAN niepusty” sam.');
+    });
+    o.querySelector('#am-ean-zamknij').onclick = () => o.remove();
+    o.querySelector('#am-ean-zapomnij').onclick = () => { localStorage.removeItem('autoPoleEan'); localStorage.removeItem('autoOpNiepusty'); o.remove(); status('zapomniane – skrypt będzie szukał operatora sam'); };
+    o.querySelector('#am-ean-kopiuj').onclick = async () => {
+      if (await kopiujTekst('ZRZUT FILTRÓW (ekran) ' + location.pathname + '\n' + tekst.slice(0, 12000))) alert('Skopiowane – wklej Claude');
+      else prompt('Skopiuj i wklej Claude:', tekst.slice(0, 4000));
+    };
   }
 
   async function wezPaczke() {
