@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-4
+// @version      2026.10.21-5
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1665,13 +1665,16 @@
         if (niepuste.length) {
           const polePoNazwie = [...document.querySelectorAll('select option')].find(o => norm(o.textContent) === 'ean' && o.value);
           niepuste.forEach(f => { if (polePoNazwie) f.field = polePoNazwie.value; });
-          // operator „nie jest pusta” z listy tej wersji Base – wpisanie własnego kodu potrafi wywalić Base
-          const opNiepusty = [...document.querySelectorAll('select option')].find(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion/i.test(o.textContent || ''));
-          if (opNiepusty) niepuste.forEach(f => { f.op = opNiepusty.value; });
-          else {                                          // operatorów Base nie ma w DOM, dopóki nie wybierze się pola – spróbuj zapamiętanego kodu
-            const zPamieci = localStorage.getItem('autoOpNiepusty');
-            if (zPamieci) niepuste.forEach(f => { f.op = zPamieci; });
-            console.log('[AutoMap] filtry: operator „nie jest pusta” nie znaleziony w DOM' + (zPamieci ? ', biorę zapamiętany: ' + zPamieci : ''));
+          // 1) zapamiętane z 🎯 (ustawione raz ręcznie w Base) – zawsze pierwszeństwo
+          const opZapamietany = localStorage.getItem('autoOpNiepusty'), poleZapamietane = localStorage.getItem('autoPoleEan');
+          if (opZapamietany) {
+            niepuste.forEach(f => { f.op = opZapamietany; if (poleZapamietane) f.field = poleZapamietane; });
+            console.log('[AutoMap] filtry: zapamiętany EAN – pole', poleZapamietane, 'operator', opZapamietany);
+          } else {
+            // 2) operator „nie jest pusta” z listy tej wersji Base – wpisanie własnego kodu potrafi wywalić Base
+            const opNiepusty = [...document.querySelectorAll('select option')].find(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion|uzupełnion/i.test(o.textContent || ''));
+            if (opNiepusty) niepuste.forEach(f => { f.op = opNiepusty.value; });
+            else console.log('[AutoMap] filtry: operator „nie jest pusta” nie w DOM – poszukam po wybraniu pola EAN (albo użyj 🎯 EAN)');
           }
         }
         if (brakTagow.length) return { ok: false, brakTagow };
