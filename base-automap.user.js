@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.20-5
+// @version      2026.10.21-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1666,10 +1666,25 @@
         }
         if (brakTagow.length) return { ok: false, brakTagow };
         const pusta = v => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+        const zOp = x => (x && (x.op != null ? x.op : (x.operation != null ? x.operation : x.filterOperation)));
         const kompletne = () => {
           const d = table_getFiltersData(c) || [];
           const plaskie = [].concat(...d);
-          return [].concat(...doUstawienia).every(f => plaskie.some(x => x.field === f.field && x.op === f.op && (f.niepuste || !pusta(x.val))));
+          return [].concat(...doUstawienia).every(f => plaskie.some(x => x.field === f.field && String(zOp(x)) === String(zOp(f)) && (f.niepuste || !pusta(x.val))));
+        };
+        // Base w różnych wersjach czyta operator z innego pola (op / operation / filterOperation).
+        // Zły klucz = „undefined is not an object (evaluating 'filterOperation.toLowerCase')” → podajemy wszystkie i nie wywalamy się na wyjątku.
+        let bladLadowania = null, uzytyKlucz = null;
+        const zWszystkimiKluczami = dane => dane.map(g => g.map(f => { const v = zOp(f); return Object.assign({}, f, { op: v, operation: v, filterOperation: v }); }));
+        const zaladuj = dane => {
+          const warianty = uzytyKlucz ? [uzytyKlucz] : ['wszystkie', 'op'];
+          for (const w of warianty) {
+            try {
+              table_loadFilterValues(c, w === 'wszystkie' ? zWszystkimiKluczami(dane) : dane);
+              uzytyKlucz = w; return true;
+            } catch (e) { bladLadowania = (e && e.message) || String(e); console.log('[AutoMap] filtry – wariant ' + w + ' nie przeszedł:', e); }
+          }
+          return false;
         };
         if (String(table_getFilteringMode(c).val()) !== String(FILTER_MODE_COMPLEX)) {
           table_setFilteringMode(c, FILTER_MODE_COMPLEX);
@@ -1677,7 +1692,7 @@
         }
         let ok = false;
         for (let proba = 0; proba < 12 && !ok; proba++) {   // do ~12 s – aż Base doczyta opcje list
-          table_loadFilterValues(c, doUstawienia);
+          zaladuj(doUstawienia);
           await czekaj(1000);
           ok = kompletne();
         }
@@ -1688,7 +1703,7 @@
           const kandydaci = [...new Set([...zListy, 'NOT LIKE', 'NOT_LIKE', 'NOTLIKE', '!LIKE', 'NOT IN', '!=', '<>'])].filter(Boolean);
           for (const op of kandydaci) {
             negacje.forEach(f => { f.op = op; });
-            for (let proba = 0; proba < 4 && !ok; proba++) { table_loadFilterValues(c, doUstawienia); await czekaj(1000); ok = kompletne(); }
+            for (let proba = 0; proba < 4 && !ok; proba++) { zaladuj(doUstawienia); await czekaj(1000); ok = kompletne(); }
             if (ok) break;
           }
         }
@@ -1698,12 +1713,12 @@
           const pola = [...new Set([niepuste[0].field, 'ean', 'product_ean', 'EAN'])];
           szukaj: for (const pole of pola) for (const op of kandydaci) {
             niepuste.forEach(f => { f.field = pole; f.op = op; });
-            for (let proba = 0; proba < 3 && !ok; proba++) { table_loadFilterValues(c, doUstawienia); await czekaj(900); ok = kompletne(); }
+            for (let proba = 0; proba < 3 && !ok; proba++) { zaladuj(doUstawienia); await czekaj(900); ok = kompletne(); }
             if (ok) break szukaj;
           }
           if (ok) console.log('[AutoMap] EAN niepusty: pole', niepuste[0].field, 'operator', niepuste[0].op);
         }
-        if (!ok) return { ok: false, dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
+        if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
         return { ok: true, dane: table_getFiltersData(c) };
@@ -3596,7 +3611,13 @@
     if (await czekajNa(() => wierszeProduktow().length > 0, 60000) && !stop()) {
       status('ustawiam filtry: ' + PROCES.nazwa + (grupa ? ' · grupa ' + grupa.nazwa + ' (' + grupa.tagi.join(', ') + ')' : '') + (zEan ? ' · tylko z EAN' : '') + '…');
       const pierwszy = wierszeProduktow()[0]?.id;
-      const r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
+      let r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
+      if ((r.blad || !r.wynik || !r.wynik.ok) && !(r.wynik && r.wynik.brakTagow)) {   // Base czasem nie doczytał jeszcze list filtrów – druga próba
+        console.log('[AutoMap] filtry – 1. próba nieudana:', r);
+        status('filtry nie weszły – próbuję jeszcze raz…');
+        await czekaj(5000);
+        r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
+      }
       if (r.wynik && r.wynik.brakTagow) {
         status('STOP: w Base nie ma tagów ' + r.wynik.brakTagow.join(', '));
         powiadom('⚠️ Stop – brak tagów', 'W katalogu nie ma tagów: ' + r.wynik.brakTagow.join(', '), { priorytet: 5, tagi: ['warning'] });
@@ -3604,7 +3625,7 @@
         return;
       }
       if (r.blad || !r.wynik || !r.wynik.ok) {
-        status('STOP: nie udało się ustawić filtrów ' + PROCES.nazwa + (r.blad ? ' (' + r.blad + ')' : '') + (r.wynik && r.wynik.negacja ? ' – Base nie przyjął „nie zawiera dowolne konto” (wyłącz 🔁 albo wyślij zrzut filtrów Claude)' : '') + (r.wynik && r.wynik.niepuste ? ' – Base nie przyjął „EAN · wartość nie pusta” (wyłącz 🏷 z EAN w ⚙️ Kroki albo wyślij Claude log z konsoli [AutoMap] filtry)' : ''));
+        status('STOP: nie udało się ustawić filtrów ' + PROCES.nazwa + (r.blad ? ' (' + r.blad + ')' : '') + (r.wynik && r.wynik.bladLadowania ? ' (Base: ' + r.wynik.bladLadowania + ')' : '') + (r.wynik && r.wynik.negacja ? ' – Base nie przyjął „nie zawiera dowolne konto” (wyłącz 🔁 albo wyślij zrzut filtrów Claude)' : '') + (r.wynik && r.wynik.niepuste ? ' – Base nie przyjął „EAN · wartość nie pusta” (wyłącz 🏷 z EAN w ⚙️ Kroki albo wyślij Claude log z konsoli [AutoMap] filtry)' : ''));
         powiadom('⚠️ Stop – filtry', 'Nie udało się ustawić filtrów ' + PROCES.nazwa + ' w katalogu.', { priorytet: 5, tagi: ['warning'] });
         console.log('[AutoMap] filtry:', r);
         pikaj(3);
