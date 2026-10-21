@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-2
+// @version      2026.10.21-3
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1649,7 +1649,7 @@
         const tagiId = {};
         document.querySelectorAll('select[name="filter_tags[]"] option').forEach(o => { tagiId[norm(o.textContent)] = o.value; });
         const brakTagow = [];
-        const doUstawienia = filtry.map(g => g.map(f => {
+        let doUstawienia = filtry.map(g => g.map(f => {
           if (f.tagi) {
             const ids = f.tagi.map(t => tagiId[norm(t)]).filter(Boolean);
             f.tagi.forEach(t => { if (!tagiId[norm(t)]) brakTagow.push(t); });
@@ -1660,9 +1660,19 @@
         }));
         // „wartość nie pusta”: pole EAN po nazwie z listy pól, operator po tekście („nie pusta” / „niepusta”…)
         const niepuste = [].concat(...doUstawienia).filter(f => f.niepuste);
+        let pominietoEan = false;
         if (niepuste.length) {
           const polePoNazwie = [...document.querySelectorAll('select option')].find(o => norm(o.textContent) === 'ean' && o.value);
           niepuste.forEach(f => { if (polePoNazwie) f.field = polePoNazwie.value; });
+          // operator „nie jest pusta” z listy tej wersji Base – wpisanie własnego kodu potrafi wywalić Base
+          const opNiepusty = [...document.querySelectorAll('select option')].find(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion/i.test(o.textContent || ''));
+          if (opNiepusty) niepuste.forEach(f => { f.op = opNiepusty.value; });
+          else {                                          // ta wersja Base nie ma takiego operatora – pomijamy filtr EAN zamiast stawać
+            doUstawienia = doUstawienia.map(g => g.filter(f => !f.niepuste));
+            niepuste.length = 0;
+            pominietoEan = true;
+            console.log('[AutoMap] filtry: brak operatora „nie jest pusta” – pomijam filtr EAN');
+          }
         }
         if (brakTagow.length) return { ok: false, brakTagow };
         const pusta = v => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -1721,7 +1731,7 @@
           }
         }
         if (!ok && niepuste.length) {
-          const zListy = [...document.querySelectorAll('select option')].filter(o => /nie\\s*(jest\\s*)?pust|niepust|not\\s*empty|wypełnion/i.test(o.textContent)).map(o => o.value);
+          const zListy = [...document.querySelectorAll('select option')].filter(o => /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion/i.test(o.textContent)).map(o => o.value);
           const kandydaci = [...new Set([...zListy, 'NOT EMPTY', 'NOT_EMPTY', 'NOTEMPTY', 'IS NOT NULL', 'NOT NULL', '!EMPTY', 'not_empty', 'notempty'])].filter(Boolean);
           const pola = [...new Set([niepuste[0].field, 'ean', 'product_ean', 'EAN'])];
           szukaj: for (const pole of pola) for (const op of kandydaci) {
@@ -1735,7 +1745,7 @@
         if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, zrzut: zrzut(), dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
-        return { ok: true, dane: table_getFiltersData(c) };
+        return { ok: true, pominietoEan, dane: table_getFiltersData(c) };
       },
 
       // sprawdź obowiązkowe parametry we wszystkich produktach paczki (nic nie zmienia)
@@ -3651,6 +3661,10 @@
         } catch (e) {}
         pikaj(3);
         return;                                        // bez pełnych filtrów nic nie wystawiamy
+      }
+      if (r.wynik && r.wynik.pominietoEan) {
+        status('⚠ filtry bez „EAN niepusty” – ta wersja Base nie ma takiego operatora (reszta filtrów OK)');
+        powiadom('⚠️ Filtr EAN pominięty', 'Base nie ma operatora „nie jest pusta” – paczka idzie bez filtra „tylko z EAN”.\n' + PROCES.nazwa, { priorytet: 4, tagi: ['warning'] });
       }
       // poczekaj aż tabela przeładuje się z nowymi filtrami
       await czekaj(1500);
