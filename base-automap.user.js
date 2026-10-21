@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-3
+// @version      2026.10.21-4
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1667,11 +1667,10 @@
           // operator „nie jest pusta” z listy tej wersji Base – wpisanie własnego kodu potrafi wywalić Base
           const opNiepusty = [...document.querySelectorAll('select option')].find(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion/i.test(o.textContent || ''));
           if (opNiepusty) niepuste.forEach(f => { f.op = opNiepusty.value; });
-          else {                                          // ta wersja Base nie ma takiego operatora – pomijamy filtr EAN zamiast stawać
-            doUstawienia = doUstawienia.map(g => g.filter(f => !f.niepuste));
-            niepuste.length = 0;
-            pominietoEan = true;
-            console.log('[AutoMap] filtry: brak operatora „nie jest pusta” – pomijam filtr EAN');
+          else {                                          // operatorów Base nie ma w DOM, dopóki nie wybierze się pola – spróbuj zapamiętanego kodu
+            const zPamieci = localStorage.getItem('autoOpNiepusty');
+            if (zPamieci) niepuste.forEach(f => { f.op = zPamieci; });
+            console.log('[AutoMap] filtry: operator „nie jest pusta” nie znaleziony w DOM' + (zPamieci ? ', biorę zapamiętany: ' + zPamieci : ''));
           }
         }
         if (brakTagow.length) return { ok: false, brakTagow };
@@ -1731,16 +1730,36 @@
           }
         }
         if (!ok && niepuste.length) {
-          const zListy = [...document.querySelectorAll('select option')].filter(o => /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion/i.test(o.textContent)).map(o => o.value);
-          const kandydaci = [...new Set([...zListy, 'NOT EMPTY', 'NOT_EMPTY', 'NOTEMPTY', 'IS NOT NULL', 'NOT NULL', '!EMPTY', 'not_empty', 'notempty'])].filter(Boolean);
-          const pola = [...new Set([niepuste[0].field, 'ean', 'product_ean', 'EAN'])];
+          // Base renderuje listę operatorów dopiero po wybraniu pola – wybierz EAN w wierszu filtra i odczytaj jego operatory
+          const operatorZUI = async () => {
+            try {
+              const kont = table_getFiltersContainer(c);
+              const selecty = [...jQuery(kont).find('select')];
+              const polowy = selecty.find(sel => [...sel.options].some(o => norm(o.textContent) === 'ean'));
+              if (!polowy) return null;
+              const opt = [...polowy.options].find(o => norm(o.textContent) === 'ean');
+              jQuery(polowy).val(opt.value).trigger('change');
+              await czekaj(1500);
+              const wiersz = polowy.closest('tr') || polowy.parentElement && polowy.parentElement.parentElement;
+              const opcjeWiersza = [...(wiersz || kont).querySelectorAll('select option')];
+              console.log('[AutoMap] operatory dla EAN:', opcjeWiersza.map(o => o.value + '=' + (o.textContent || '').trim()).slice(0, 40));
+              const kand = opcjeWiersza.find(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion|uzupełnion/i.test(o.textContent || ''));
+              if (kand) { try { localStorage.setItem('autoPoleEan', String(opt.value)); } catch (e) {} }
+              return kand ? kand.value : null;
+            } catch (e) { console.log('[AutoMap] operatorZUI:', e); return null; }
+          };
+          const zUI = await operatorZUI();
+          const zListy = [...document.querySelectorAll('select option')].filter(o => o.value && /nie\s*(jest\s*)?pust|niepust|not\s*empty|wypełnion|uzupełnion/i.test(o.textContent || '')).map(o => o.value);
+          const zPamieci = localStorage.getItem('autoOpNiepusty');
+          const kandydaci = [...new Set([zUI, zPamieci, ...zListy, 'notempty', 'not_empty', 'NOT EMPTY', 'NOT_EMPTY', 'NOTEMPTY', 'is not null', 'IS NOT NULL', 'NOT NULL', 'notnull', '!EMPTY', 'nempty', 'filled', '!=', '<>'])].filter(Boolean);
+          const pola = [...new Set([localStorage.getItem('autoPoleEan'), niepuste[0].field, 'ean', 'product_ean', 'EAN'].filter(Boolean))];
           szukaj: for (const pole of pola) for (const op of kandydaci) {
             if (Date.now() > koniecCzasu) break szukaj;
             niepuste.forEach(f => { f.field = pole; f.op = op; });
             for (let proba = 0; proba < 3 && !ok; proba++) { zaladuj(doUstawienia); await czekaj(900); ok = kompletne(); }
             if (ok) break szukaj;
           }
-          if (ok) console.log('[AutoMap] EAN niepusty: pole', niepuste[0].field, 'operator', niepuste[0].op);
+          if (ok) { console.log('[AutoMap] EAN niepusty: pole', niepuste[0].field, 'operator', niepuste[0].op); try { localStorage.setItem('autoOpNiepusty', String(niepuste[0].op)); localStorage.setItem('autoPoleEan', String(niepuste[0].field)); } catch (e) {} }
         }
         if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, zrzut: zrzut(), dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
