@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-1
+// @version      2026.10.21-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1690,11 +1690,23 @@
           table_setFilteringMode(c, FILTER_MODE_COMPLEX);
           await czekaj(800);
         }
+        // zrzut dla diagnostyki: jak wyglądają filtry i jakie operatory ma ta wersja Base
+        const zrzut = () => {
+          let selecty = [];
+          try {
+            const kont = table_getFiltersContainer(c);
+            selecty = [...jQuery(kont).find('select')].slice(0, 12).map(s => ({ name: s.name || s.id, opcje: [...s.options].slice(0, 25).map(o => o.value + '=' + (o.textContent || '').trim()) }));
+          } catch (e) {}
+          return { proba: doUstawienia, wBase: [].concat(...(table_getFiltersData(c) || [])).slice(0, 8), selecty };
+        };
+        const koniecCzasu = Date.now() + 110000;             // twardy limit, żeby nie było „brak odpowiedzi”
         let ok = false;
         for (let proba = 0; proba < 12 && !ok; proba++) {   // do ~12 s – aż Base doczyta opcje list
-          zaladuj(doUstawienia);
+          const poszlo = zaladuj(doUstawienia);
+          if (!poszlo && !uzytyKlucz) return { ok: false, bladLadowania, wyjatek: true, zrzut: zrzut() };   // Base wywala się na każdym wariancie – nie ma po co czekać
           await czekaj(1000);
           ok = kompletne();
+          if (Date.now() > koniecCzasu) break;
         }
         // „nie zawiera” (np. Marketplace (oferta) nie zawiera dowolnego konta) – Base może mieć inny kod operatora; szukamy go
         const negacje = [].concat(...doUstawienia).filter(f => f.op === 'NOT LIKE');
@@ -1702,6 +1714,7 @@
           const zListy = [...document.querySelectorAll('select option')].filter(o => /nie zawiera/i.test(o.textContent)).map(o => o.value);
           const kandydaci = [...new Set([...zListy, 'NOT LIKE', 'NOT_LIKE', 'NOTLIKE', '!LIKE', 'NOT IN', '!=', '<>'])].filter(Boolean);
           for (const op of kandydaci) {
+            if (Date.now() > koniecCzasu) break;
             negacje.forEach(f => { f.op = op; });
             for (let proba = 0; proba < 4 && !ok; proba++) { zaladuj(doUstawienia); await czekaj(1000); ok = kompletne(); }
             if (ok) break;
@@ -1712,13 +1725,14 @@
           const kandydaci = [...new Set([...zListy, 'NOT EMPTY', 'NOT_EMPTY', 'NOTEMPTY', 'IS NOT NULL', 'NOT NULL', '!EMPTY', 'not_empty', 'notempty'])].filter(Boolean);
           const pola = [...new Set([niepuste[0].field, 'ean', 'product_ean', 'EAN'])];
           szukaj: for (const pole of pola) for (const op of kandydaci) {
+            if (Date.now() > koniecCzasu) break szukaj;
             niepuste.forEach(f => { f.field = pole; f.op = op; });
             for (let proba = 0; proba < 3 && !ok; proba++) { zaladuj(doUstawienia); await czekaj(900); ok = kompletne(); }
             if (ok) break szukaj;
           }
           if (ok) console.log('[AutoMap] EAN niepusty: pole', niepuste[0].field, 'operator', niepuste[0].op);
         }
-        if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
+        if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, zrzut: zrzut(), dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
         return { ok: true, dane: table_getFiltersData(c) };
@@ -3611,12 +3625,12 @@
     if (await czekajNa(() => wierszeProduktow().length > 0, 60000) && !stop()) {
       status('ustawiam filtry: ' + PROCES.nazwa + (grupa ? ' · grupa ' + grupa.nazwa + ' (' + grupa.tagi.join(', ') + ')' : '') + (zEan ? ' · tylko z EAN' : '') + '…');
       const pierwszy = wierszeProduktow()[0]?.id;
-      let r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
+      let r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 180000);
       if ((r.blad || !r.wynik || !r.wynik.ok) && !(r.wynik && r.wynik.brakTagow)) {   // Base czasem nie doczytał jeszcze list filtrów – druga próba
         console.log('[AutoMap] filtry – 1. próba nieudana:', r);
         status('filtry nie weszły – próbuję jeszcze raz…');
         await czekaj(5000);
-        r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 30000);
+        r = await bazaBase('ustawFiltry', { filtry, rozmiar }, 180000);
       }
       if (r.wynik && r.wynik.brakTagow) {
         status('STOP: w Base nie ma tagów ' + r.wynik.brakTagow.join(', '));
@@ -3628,6 +3642,13 @@
         status('STOP: nie udało się ustawić filtrów ' + PROCES.nazwa + (r.blad ? ' (' + r.blad + ')' : '') + (r.wynik && r.wynik.bladLadowania ? ' (Base: ' + r.wynik.bladLadowania + ')' : '') + (r.wynik && r.wynik.negacja ? ' – Base nie przyjął „nie zawiera dowolne konto” (wyłącz 🔁 albo wyślij zrzut filtrów Claude)' : '') + (r.wynik && r.wynik.niepuste ? ' – Base nie przyjął „EAN · wartość nie pusta” (wyłącz 🏷 z EAN w ⚙️ Kroki albo wyślij Claude log z konsoli [AutoMap] filtry)' : ''));
         powiadom('⚠️ Stop – filtry', 'Nie udało się ustawić filtrów ' + PROCES.nazwa + ' w katalogu.', { priorytet: 5, tagi: ['warning'] });
         console.log('[AutoMap] filtry:', r);
+        try {                                            // zrzut do schowka – do wklejenia Claude
+          const t = 'ZRZUT FILTRÓW AutoMap ' + ((typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '') + '\n'
+            + 'proces: ' + PROCES.nazwa + ' · URL: ' + location.pathname + location.search + '\n'
+            + JSON.stringify(r, null, 1).slice(0, 12000);
+          if (await kopiujTekst(t)) status('zrzut filtrów skopiowany – wklej go Claude');
+          else prompt('Skopiuj i wklej Claude:', t.replace(/\n/g, ' | ').slice(0, 4000));
+        } catch (e) {}
         pikaj(3);
         return;                                        // bez pełnych filtrów nic nie wystawiamy
       }
