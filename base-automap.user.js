@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-6
+// @version      2026.10.21-7
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -1231,7 +1231,7 @@
         zatrzymajCykl('3 PACZKI Z RZĘDU PONIŻEJ 15%', (wpis.konto || '') + ': trzy paczki pod rząd z bardzo małą liczbą dobrych (' + ost3.map(w => (w.dobre || 0) + '/' + w.probowano).join(', ') + '). Zatrzymałem – sprawdź błędy / niedopasowane w Base.');
       }
     }
-    if (!opcje.pusta) lsDel('autoNiedopProba');   // udana paczka – licznik „cała paczka niedopasowana” od nowa
+    if (!opcje.pusta) { lsDel('autoNiedopProba'); lsDel('autoNiedopSeria'); }   // udana paczka – liczniki „cała paczka niedopasowana” od nowa
     const kontoL = (oczek && oczek.konto) || '';                 // samo konto (bez „· grupa”)
     if (!opcje.pusta && kontoL && Number(wpis.dobre) > 0) {
       const razem = dodajDobre(kontoL, wpis.dobre), lim = limitDobrych();
@@ -2880,6 +2880,22 @@
               return;
             }
             lsDel('autoNiedopProba');
+            // 🙈 „lecę mimo błędów”: nie zatrzymuj – dopisz tę paczkę do spisu i weź następną (z bezpiecznikiem na serię)
+            if (ignorujBledy() && cyklWlaczony()) {
+              const seria = (parseInt(lsGet('autoNiedopSeria', '0')) || 0) + 1;
+              lsSet('autoNiedopSeria', String(seria));
+              if (seria <= 20) {
+                status('🙈 cała paczka niedopasowana (' + seria + '/20) – dopisuję do spisu i biorę następną');
+                powiadom('🙈 Cała paczka niedopasowana – jadę dalej', ilePrzed + ' produktów bez dopasowania (' + seria + '/20) – dopisane do spisu, biorę następną paczkę.', { priorytet: 3, tagi: ['see_no_evil'] });
+                await zapiszPoWystawieniu({ pusta: true });
+                await czekaj(2000);
+                if (PROCES.poWystawieniu === 'katalog') await wrocDoKatalogu();
+                else { lsSet(L_ETAP, 'mapowania'); location.href = adresMapowan(lsGet(L_KATALOG)); }
+                return;
+              }
+              lsDel('autoNiedopSeria');
+              status('🛑 20 paczek z rzędu całych niedopasowanych – stop mimo trybu 🙈');
+            }
             // FINALNE: cała paczka niedopasowana → spróbuj tę samą paczkę do 3 razy; za 3. razem stop + przycisk „dopisz do spisu i jedź dalej”
             if (PROCES.poWystawieniu === 'katalog' && idsCalej.length) {
               let st = null; try { st = JSON.parse(lsGet('autoNiedopFin') || 'null'); } catch {}
@@ -2907,10 +2923,15 @@
               return;
             }
             lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
+            if (idsCalej.length) {                       // zapamiętaj paczkę, żeby dało się ją dopisać do spisu jednym kliknięciem
+              const oczekP = (() => { try { return JSON.parse(lsGet(L_OCZEKUJACA) || 'null') || {}; } catch { return {}; } })();
+              lsSet('autoNiedopFin', JSON.stringify({ ids: idsCalej.map(String), licz: 1, kat: oczekP.katId || lsGet(L_KATALOG, ''), konto: oczekP.konto || '', full: lsGet(L_FULL) === '1', t: Date.now() }));
+            }
             const powod = 'Wszystkie ' + ilePrzed + ' produkty z paczki są NIEDOPASOWANE. Najczęściej: brak mapowania EAN (= SKU) dla tego katalogu albo w SKU nie ma jeszcze nowych EAN-ów z przerabiacza. Produkty NIE zostały dopisane do spisu.';
             status('🛑 zatrzymano – cała paczka niedopasowana');
-            pokazAlarm('CAŁA PACZKA NIEDOPASOWANA', powod + ' Popraw i uruchom ponownie.');
-            powiadom('🛑 Cała paczka niedopasowana', powod + '\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'] });
+            pokazAlarm('CAŁA PACZKA NIEDOPASOWANA', powod + ' Popraw i uruchom ponownie – albo kliknij „Dopisz do spisu i jedź dalej”.');
+            if (idsCalej.length) { const al0 = document.getElementById('am-alarm'); if (al0) { const b0 = document.createElement('button'); b0.textContent = '📋 Dopisz do spisu i jedź dalej'; b0.style.cssText = 'margin:10px 0 0 8px;background:#2e7d32;color:#fff;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer'; b0.onclick = () => dopiszNiedopIJedz(true); al0.appendChild(b0); } }
+            powiadom('🛑 Cała paczka niedopasowana', powod + '\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'], akcje: [['📋 Dopisz i jedź dalej', 'dopisz'], ['⏹ Zostaw', 'stop']] });
             pikaj(3);
             odswiezPrzyciski();
             return;
