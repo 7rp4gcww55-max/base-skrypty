@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.22-1
+// @version      2026.10.22-2
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -107,8 +107,8 @@
   // Tagu, którego w danym katalogu nie ma, skrypt nie wymaga – bierze te, które są (stop tylko gdy nie ma ŻADNEGO z grupy).
   const GRUPY_FINALNE = [
     { nazwa: 'DUŻE',      tagi: ['LOG:GABARYT', 'LOG:PALETA'],                          cennik: 'DUZE' },
-    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD', 'LOG:PUNKT-KURIER'], cennik: 'KURIER' },
-    { nazwa: 'PACZKOMAT', tagi: ['LOG:PACZKOMAT-A', 'LOG:PACZKOMAT-B', 'LOG:PACZKOMAT-C', 'LOG:PACZKOMAT-PUNKT-KURIER'], cennik: 'PACZKOMAT' }
+    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD', 'PUNKT-KURIER'], cennik: 'KURIER' },
+    { nazwa: 'PACZKOMAT', tagi: ['LOG:PACZKOMAT-A', 'LOG:PACZKOMAT-B', 'LOG:PACZKOMAT-C', 'PACZKOMAT-PUNKT-KURIER'], cennik: 'PACZKOMAT' }
   ];
 
   // OBOWIĄZKOWE PARAMETRY – sprawdzane w danych Base po wszystkich krokach, przed wystawieniem.
