@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.21-7
+// @version      2026.10.22-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -103,10 +103,12 @@
 
   // FINALNE wystawiane grupami tagów – każda grupa ma swój cennik wysyłki (szukany po ostatnim słowie nazwy cennika).
   // Kolejność: najpierw cała grupa DUŻE, potem KURIER, potem PACZKOMAT. Inne tagi (np. MULTIPACZKA) nie są brane.
+  // STARE TAGI (z poprzedniego nazewnictwa) idą razem z nowymi: PUNKT-KURIER → KURIER, PACZKOMAT-PUNKT-KURIER → PACZKOMAT.
+  // Tagu, którego w danym katalogu nie ma, skrypt nie wymaga – bierze te, które są (stop tylko gdy nie ma ŻADNEGO z grupy).
   const GRUPY_FINALNE = [
     { nazwa: 'DUŻE',      tagi: ['LOG:GABARYT', 'LOG:PALETA'],                          cennik: 'DUZE' },
-    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD'],                   cennik: 'KURIER' },
-    { nazwa: 'PACZKOMAT', tagi: ['LOG:PACZKOMAT-A', 'LOG:PACZKOMAT-B', 'LOG:PACZKOMAT-C'], cennik: 'PACZKOMAT' }
+    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD', 'LOG:PUNKT-KURIER'], cennik: 'KURIER' },
+    { nazwa: 'PACZKOMAT', tagi: ['LOG:PACZKOMAT-A', 'LOG:PACZKOMAT-B', 'LOG:PACZKOMAT-C', 'LOG:PACZKOMAT-PUNKT-KURIER'], cennik: 'PACZKOMAT' }
   ];
 
   // OBOWIĄZKOWE PARAMETRY – sprawdzane w danych Base po wszystkich krokach, przed wystawieniem.
@@ -1653,14 +1655,27 @@
         const c = 'table_inventory_products_container';
         const czekaj = ms => new Promise(r => setTimeout(r, ms));
         // wartości list (np. "Dowolne konto marketplace") Base doczytuje w tle – podajemy je jako tablice
-        // tagi podane nazwami (np. "LOG:PALETA") – zamień na ID z listy tagów Base
-        const tagiId = {};
-        document.querySelectorAll('select[name="filter_tags[]"] option').forEach(o => { tagiId[norm(o.textContent)] = o.value; });
-        const brakTagow = [];
+        // tagi podane nazwami (np. "LOG:PALETA") – zamień na ID z listy tagów Base.
+        // Dopasowanie luźne: bez znaczenia wielkość liter, prefiks "LOG:" i spacje/podkreślniki zamiast myślników,
+        // więc stary tag wpisany jako "PUNKT-KURIER" trafi też w "LOG:PUNKT KURIER".
+        const tagiId = {}, tagiKlucz = {};
+        const kluczTagu = t => norm(t).replace(/^log\\s*:\\s*/, '').replace(/[\\s_-]+/g, '-');
+        document.querySelectorAll('select[name="filter_tags[]"] option').forEach(o => {
+          if (!o.value) return;
+          tagiId[norm(o.textContent)] = o.value;
+          const k = kluczTagu(o.textContent);
+          if (k && !(k in tagiKlucz)) tagiKlucz[k] = o.value;
+        });
+        const idTagu = t => tagiId[norm(t)] || tagiKlucz[kluczTagu(t)] || null;
+        const brakTagow = [], pominieteTagi = [];
         let doUstawienia = filtry.map(g => g.map(f => {
           if (f.tagi) {
-            const ids = f.tagi.map(t => tagiId[norm(t)]).filter(Boolean);
-            f.tagi.forEach(t => { if (!tagiId[norm(t)]) brakTagow.push(t); });
+            const ids = [...new Set(f.tagi.map(idTagu).filter(Boolean))];
+            const braki = f.tagi.filter(t => !idTagu(t));
+            // tag, którego w tym katalogu nie ma (np. stary PUNKT-KURIER) – pomijamy;
+            // dopiero brak WSZYSTKICH tagów grupy zatrzymuje bota
+            if (ids.length) braki.forEach(t => pominieteTagi.push(t));
+            else braki.forEach(t => brakTagow.push(t));
             return { field: f.field, op: f.op, val: ids };
           }
           if (f.niepuste) return Object.assign({}, f);
@@ -1685,6 +1700,7 @@
           }
         }
         if (brakTagow.length) return { ok: false, brakTagow };
+        if (pominieteTagi.length) console.log('[AutoMap] filtry: w tym katalogu nie ma tagów ' + pominieteTagi.join(', ') + ' – pomijam je');
         const pusta = v => v == null || v === '' || (Array.isArray(v) && v.length === 0);
         const zOp = x => (x && (x.op != null ? x.op : (x.operation != null ? x.operation : x.filterOperation)));
         const kompletne = () => {
@@ -1775,7 +1791,7 @@
         if (!ok) return { ok: false, bladLadowania, klucz: uzytyKlucz, zrzut: zrzut(), dane: table_getFiltersData(c), negacja: negacje.length > 0, niepuste: niepuste.length > 0, opcje: [...document.querySelectorAll('select option')].filter(o => /pust|ean/i.test(o.textContent)).map(o => o.value + '=' + o.textContent.trim()).slice(0, 30) };
         if (rozmiar) jQuery(table_getFiltersContainer(c)).find('#rows_per_page').val(rozmiar);
         table_setFilters(c);
-        return { ok: true, pominietoEan, dane: table_getFiltersData(c) };
+        return { ok: true, pominietoEan, pominieteTagi, dane: table_getFiltersData(c) };
       },
 
       // aktualne filtry ustawione na ekranie + listy pól/operatorów (do zapamiętania „EAN niepusty”)
@@ -3772,6 +3788,10 @@
         } catch (e) {}
         pikaj(3);
         return;                                        // bez pełnych filtrów nic nie wystawiamy
+      }
+      if (r.wynik && r.wynik.pominieteTagi && r.wynik.pominieteTagi.length) {
+        status('tagi nieobecne w tym katalogu: ' + r.wynik.pominieteTagi.join(', ') + ' – biorę po pozostałych tagach grupy');
+        await czekaj(1000);
       }
       if (r.wynik && r.wynik.pominietoEan) {
         status('⚠ filtry bez „EAN niepusty” – ta wersja Base nie ma takiego operatora (reszta filtrów OK)');
