@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.28
+// @version      1.29
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -48,7 +48,7 @@
   const krokiZad = z => KROKI.filter(k => !z.kroki || z.kroki.includes(k));
 
   // ---------- pamięć ----------
-  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik', L_AD = 'nsAdres', L_AD_W = 'nsAdresWynik', L_MC = 'nsMnoznik', L_MC_W = 'nsMnoznikWynik';
+  const L_H = 'nsHurtownie', L_HIST = 'nsHistoria', L_Z = 'nsZadanie2', L_LOG = 'nsLog', L_OST = 'nsOstatnie', L_OS = 'nsZmianaOsoby', L_OS_W = 'nsZmianaOsobyWynik', L_PB = 'nsPobieranie', L_PB_W = 'nsPobieranieWynik', L_AD = 'nsAdres', L_AD_W = 'nsAdresWynik', L_MC = 'nsMnoznik', L_MC_W = 'nsMnoznikWynik', L_ST = 'nsStanZero', L_ST_W = 'nsStanZeroWynik';
   const czytaj = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch { return d; } };
   const pisz = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const hurtownie = () => { const h = czytaj(L_H, null); if (h) { if (h.LEAN && !localStorage.getItem('nsMigrLeanZdj11')) { if ((+h.LEAN.maxZdjecie || 6) < 11) h.LEAN.maxZdjecie = 11; pisz(L_H, h); localStorage.setItem('nsMigrLeanZdj11', '1'); } for (const [k, v] of Object.entries(DOMYSLNE.h)) if (!h[k]) h[k] = v; if (!localStorage.getItem('nsMigrMax218')) { for (const [k, v] of Object.entries(h)) { if (k === 'LEAN') { if (!v.maxMnoznik) v.maxMnoznik = 1.99; } else if (!v.maxMnoznik || +v.maxMnoznik === 1.99) v.maxMnoznik = MAX_MNOZNIK; } pisz(L_H, h); localStorage.setItem('nsMigrMax218', '1'); } if (h.GERMAN && !h.GERMAN.warunkiNazwa && !localStorage.getItem('nsMigrGermanWar')) { h.GERMAN.warunkiNazwa = 'AH GERMAN'; pisz(L_H, h); localStorage.setItem('nsMigrGermanWar', '1'); } if (!localStorage.getItem(MIGR_BAZA + 'H')) { dociagnijHurtownie(h); pisz(L_H, h); localStorage.setItem(MIGR_BAZA + 'H', '1'); } return h; } return JSON.parse(JSON.stringify(DOMYSLNE.h)); };
@@ -202,18 +202,20 @@
     const zmPb = czytaj(L_PB, null);
     const zmAd = czytaj(L_AD, null);
     const zmMc = czytaj(L_MC, null);
+    const zmSt = czytaj(L_ST, null);
     const ost = !z && czytaj(L_OST, null);
     if (ost) { const r = wynik(ost); stan = 'gotowy · ostatnio ' + ost.hurtownia + ': ' + r.ok + '/' + r.wszystkie + ' ✔' + (r.zle ? ' · <span style="color:#ff8a87">' + r.zle + ' nie przeszło</span>' : '') + (ost.zatrzymane ? ' (zatrzymane)' : ''); }
     if (z) { const n = nastepny(z); const K = krokiZad(z); const zr = z.sklepy.reduce((a, s) => a + K.filter(k => s.ok[k] === true).length, 0); stan = (z.pauza ? '⏸ pauza · ' : '▶ ') + z.hurtownia + ' · ' + zr + '/' + z.sklepy.length * K.length + (n ? ' · teraz: ' + OPIS[n.typ] + ' ' + n.s.sklep : ' · koniec'); }
     const l = czytaj(L_LOG, []);
     panel.innerHTML = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
       <b id="ns-uchwyt" title="Przeciągnij, żeby przesunąć · 2× klik = wróć na miejsce" style="margin-right:auto;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none">⠿ 📂 Nowe sklepy</b>
-      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${btn('ns-adres', '📍', '#1565c0')}${btn('ns-mnoznik', '💰', '#827717')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
+      ${btn('ns-nowe', '+ Nowe', '#2e7d32')}${btn('ns-hurt', '🏭', '#455a64')}${btn('ns-osoba', '👤', '#5d4037')}${btn('ns-pobier', '⏱ 1 min', '#00695c')}${btn('ns-adres', '📍', '#1565c0')}${btn('ns-mnoznik', '💰', '#827717')}${btn('ns-stan', '0️⃣', '#4527a0')}${/allegro_link_parameters/.test(location.pathname) ? btn('ns-zrzut', '🔎', '#6a1b9a') : ''}${z ? btn('ns-pauza', z.pauza ? '▶' : '⏸', '#ef6c00') + btn('ns-stop', '⏹ Stop', '#c62828') : ''}${btn('ns-log', logOtwarty ? '▾' : '▸', '#37474f')}</div>
       <div style="margin-top:5px;opacity:.9;word-break:break-word">${stan}</div>
       ${zmOs ? '<div style="margin-top:5px;padding:5px;background:#3e2723;border-radius:6px">👤 Osoba kontaktowa WzA: ' + Math.min(zmOs.i, zmOs.lista.length) + '/' + zmOs.lista.length + (zmOs.lista[zmOs.i] ? ' · teraz: ' + esc(zmOs.lista[zmOs.i].nazwa.slice(0, 40)) : '') + ' ' + btn('ns-osoba-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmPb ? '<div style="margin-top:5px;padding:5px;background:#004d40;border-radius:6px">⏱ Pobieranie co 1 min: ' + Math.min(zmPb.i, zmPb.lista.length) + '/' + zmPb.lista.length + (zmPb.lista[zmPb.i] ? ' · teraz: ' + esc(String(zmPb.lista[zmPb.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-pobier-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmAd ? '<div style="margin-top:5px;padding:5px;background:#0d47a1;border-radius:6px">📍 Adres magazynu (' + esc(zmAd.d.klucz) + '): ' + Math.min(zmAd.i, zmAd.lista.length) + '/' + zmAd.lista.length + (zmAd.lista[zmAd.i] ? ' · teraz: ' + esc(String(zmAd.lista[zmAd.i].nazwa).slice(0, 40)) : '') + ' ' + btn('ns-adres-stop', '⏹', '#c62828') + '</div>' : ''}
       ${zmMc ? '<div style="margin-top:5px;padding:5px;background:#33691e;border-radius:6px">💰 Mnożnik ceny: ' + Math.min(zmMc.i, zmMc.lista.length) + '/' + zmMc.lista.length + (zmMc.lista[zmMc.i] ? ' · teraz: ' + esc(String(zmMc.lista[zmMc.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-mnoznik-stop', '⏹', '#c62828') + '</div>' : ''}
+      ${zmSt ? '<div style="margin-top:5px;padding:5px;background:#311b92;border-radius:6px">0️⃣ Zakończ ofertę przy stanie: ' + Math.min(zmSt.i, zmSt.lista.length) + '/' + zmSt.lista.length + (zmSt.lista[zmSt.i] ? ' · teraz: ' + esc(String(zmSt.lista[zmSt.i].sklep).slice(0, 40)) : '') + ' ' + btn('ns-stan-stop', '⏹', '#c62828') + '</div>' : ''}
       ${ost ? '<div style="margin-top:5px;display:flex;gap:5px">' + btn('ns-pods', '📋 Podsumowanie', '#1565c0') + (wynik(ost).zle ? btn('ns-powt', '🔁 Powtórz nieudane', '#6a1b9a') : '') + '</div>' : ''}
       ${z ? '<div style="opacity:.6;font-size:11px;margin-top:3px">' + krokiZad(z).map((k, i) => (i + 1) + '=' + OPIS[k]).join(' · ') + '</div>' : ''}
       ${z ? '<div style="margin-top:5px;max-height:120px;overflow:auto">' + z.sklepy.map(s => '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + s.sklep + ' ' + krokiZad(z).map(k => s.ok[k] === true ? '✅' : s.ok[k] ? '❌' : '·').join('') + '</div>').join('') + '</div>' : ''}
@@ -229,6 +231,8 @@
     const ad = panel.querySelector('#ns-adres-stop'); if (ad) ad.onclick = () => { const j = czytaj(L_AD, null); if (j) { j.stop = true; pisz(L_AD, j); log('📍 zatrzymuję zmianę adresu…'); } };
     panel.querySelector('#ns-mnoznik').onclick = () => { const w = czytaj(L_MC_W, null); if (w && !czytaj(L_MC, null) && confirm('Pokazać wynik ostatniego czyszczenia mnożnika ceny?\n(Anuluj = zacznij nowe)')) return oknoMnoznikWynik(); startMnoznik(); };
     const mc = panel.querySelector('#ns-mnoznik-stop'); if (mc) mc.onclick = () => { const j = czytaj(L_MC, null); if (j) { j.stop = true; pisz(L_MC, j); log('💰 zatrzymuję czyszczenie mnożnika…'); } };
+    panel.querySelector('#ns-stan').onclick = () => { const w = czytaj(L_ST_W, null); if (w && !czytaj(L_ST, null) && confirm('Pokazać wynik ostatniego sprawdzania „zakończ ofertę przy stanie = 0”?\n(Anuluj = sprawdź wszystko od nowa)')) return oknoStanWynik(); startStan(); };
+    const st = panel.querySelector('#ns-stan-stop'); if (st) st.onclick = () => { const j = czytaj(L_ST, null); if (j) { j.stop = true; pisz(L_ST, j); log('0️⃣ zatrzymuję sprawdzanie stanu…'); } };
     panel.querySelector('#ns-log').onclick = () => { logOtwarty = !logOtwarty; rysujPanel(); };
     const pd = panel.querySelector('#ns-pods'); if (pd) pd.onclick = () => oknoPodsumowanie();
     const pw = panel.querySelector('#ns-powt'); if (pw) pw.onclick = () => powtorz(czytaj(L_OST, null), 'nieudane');
@@ -763,6 +767,7 @@
       await pokaz(sk);
       const r = sekcjaWStronie(sk, false);
       if (sk.tab === 'account_modal_options') { await czekaj(800); sekcjaWStronie({ ...sk, wybory: {}, radio: [] }, false); }
+      if (sk.tab === ST_TAB) { const w0 = await zeroWStanie(document.getElementById(ST_TAB)); log('   0️⃣ zakończ ofertę przy stanie: ' + w0.info); }
       if (r.bledy.length) log('   ⚠ ' + sk.nazwa + ': ' + r.bledy.join('; '));
       await czekaj(500);
       const b = document.getElementById(sk.tab)?.querySelector('.btn_form_save');
@@ -771,7 +776,10 @@
     }
     if (!await otworz()) return 'nie otworzyły się ustawienia do sprawdzenia';
     const zle = [];
-    for (const sk of S) { await pokaz(sk); zle.push(...sekcjaWStronie(sk, true).zle.map(x => sk.nazwa + ': ' + x)); }
+    for (const sk of S) {
+      await pokaz(sk); zle.push(...sekcjaWStronie(sk, true).zle.map(x => sk.nazwa + ': ' + x));
+      if (sk.tab === ST_TAB) { const v = wartoscStanu(document.getElementById(ST_TAB)); if (!zeroOk(v)) zle.push('Stany: zakończ ofertę przy stanie=„' + v + '”'); }
+    }
     await zamknijModal();
     if (zle.length) return s.proby.allegro < 2 ? 'ponów' : 'po zapisie nie zgadza się: ' + zle.join('; ');
     log('   zdjęcie nr ' + s.zdjecie + ', mnożnik ×' + s.mnoznik + ', czas ' + czasTekst(s.czas || h.czasWysylki));
@@ -1319,6 +1327,176 @@
   }
 
   // =====================================================================
+  // 0️⃣ „ZAKOŃCZ OFERTĘ PRZY STANIE” = 0 we wszystkich integracjach Allegro
+  //    Base gubi wartość wpisaną zwykłym el.value (po wyjściu z pola wraca stara),
+  //    więc piszemy jak z klawiatury: keydown/keypress/input/keyup + execCommand, i sprawdzamy po blur.
+  // =====================================================================
+  const ST_TAB = 'account_modal_sync_quantity', ST_KOTWICA = 'sync_quantity_4';
+  const ST_ID = ['end_quantity', 'quantity_end', 'end_stock', 'stock_end', 'end_quantity_limit', 'quantity_limit', 'min_quantity', 'end_limit_quantity'];
+  const ST_POMIN = ['end_limit_day', 'max_quantity'];
+  const ST_ETYKIETA = /zako[nń]cz.{0,60}(ofert|aukcj).{0,60}(stan|ilo[śs])|(stan|ilo[śs])[^.]{0,60}zako[nń]cz.{0,30}(ofert|aukcj)/i;
+  const zeroOk = v => { const t = String(v == null ? '' : v).trim(); if (t === '') return false; const n = parseFloat(t.replace(/\s/g, '').replace(',', '.')); return !isNaN(n) && Math.abs(n) < 0.0001; };
+  function poleStanu(pane) {
+    if (!pane) return null;
+    for (const id of ST_ID) { const e = pane.querySelector('[id="' + id + '"]'); if (e && widoczny(e)) return e; }
+    const kand = [...pane.querySelectorAll('input[type=text], input[type=number], input[type=tel], input:not([type])')]
+      .filter(e => widoczny(e) && !ST_POMIN.includes(e.id));
+    for (const el of kand) {
+      let n = el.parentElement, t = '';
+      for (let i = 0; i < 5 && n; i++) { t = String(n.innerText || n.textContent || '').replace(/\s+/g, ' '); if (t.length > 25) break; n = n.parentElement; }
+      if (ST_ETYKIETA.test(t)) return el;
+    }
+    return null;
+  }
+  const idyPol = pane => [...(pane ? pane.querySelectorAll('input') : [])].filter(widoczny).map(e => (e.id || e.name || '?') + '=„' + String(e.value).slice(0, 12) + '”').join(', ').slice(0, 300);
+  const wartoscStanu = pane => { const el = poleStanu(pane); return el ? String(el.value || '').trim() : '(brak pola)'; };
+  // wpisanie wartości tak, żeby Base ją przyjął (i nie cofnął po wyjściu z pola)
+  async function wpiszJakRecznie(el, txt) {
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const opis = Object.getOwnPropertyDescriptor(proto, 'value');
+    const nast = opis && opis.set;
+    const an = (W.AutoNumeric && W.AutoNumeric.getAutoNumericElement && W.AutoNumeric.getAutoNumericElement(el)) || null;
+    const ustaw = v => { if (an) { try { an.set(v === '' ? '' : v); return; } catch {} } if (nast) nast.call(el, v); else el.value = v; };
+    const klaw = (typ, ch) => { const kc = ch.charCodeAt(0); el.dispatchEvent(new KeyboardEvent(typ, { key: ch, code: 'Digit' + ch, keyCode: kc, which: kc, bubbles: true, cancelable: true })); };
+    const probuj = async sposob => {
+      el.focus(); el.click(); await czekaj(120);
+      try { el.setSelectionRange(0, String(el.value).length); } catch {}
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true }));
+      ustaw('');
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', keyCode: 8, which: 8, bubbles: true }));
+      await czekaj(120);
+      let buf = '';
+      for (const ch of String(txt)) {
+        buf += ch;
+        klaw('keydown', ch); klaw('keypress', ch);
+        let poszlo = false;
+        if (sposob === 'exec') { try { el.focus(); poszlo = document.execCommand('insertText', false, ch); } catch { poszlo = false; } }
+        if (!poszlo) { ustaw(buf); el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' })); }
+        klaw('keyup', ch);
+        const j = $j(); if (j) j(el).trigger('input').trigger('keyup');
+        await czekaj(90);
+      }
+      zmien(el);
+      const j = $j(); if (j) j(el).trigger('change').trigger('blur');
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+      try { el.blur(); } catch {}
+      await czekaj(400);
+      return String(el.value || '').trim();
+    };
+    let teraz = await probuj('klawisze');
+    if (!zeroOk(teraz) && String(txt) === '0') teraz = await probuj('exec');
+    if (!zeroOk(teraz) && String(txt) === '0') teraz = await probuj('klawisze');
+    return teraz;
+  }
+  async function zeroWStanie(pane) {
+    if (!pane) return { ok: false, info: 'brak zakładki Stany' };
+    const el = poleStanu(pane);
+    if (!el) return { ok: false, brakPola: true, info: 'nie znalazłem pola (pola w zakładce: ' + idyPol(pane) + ')' };
+    const bylo = String(el.value || '').trim();
+    if (zeroOk(bylo)) return { ok: true, juz: true, info: 'już było 0' };
+    const teraz = await wpiszJakRecznie(el, '0');
+    return zeroOk(teraz)
+      ? { ok: true, info: '„' + (bylo || 'puste') + '” → 0' }
+      : { ok: false, info: 'wpisałem 0, a w polu jest „' + teraz + '” (było „' + bylo + '”)' };
+  }
+  async function startStan(lista) {
+    if (zad()) return alert('Najpierw niech skończy zadanie Nowe sklepy (albo je zatrzymaj).');
+    if (czytaj(L_OS, null)) return alert('Trwa zmiana osoby kontaktowej – poczekaj, aż skończy.');
+    if (czytaj(L_PB, null)) return alert('Trwa ustawianie pobierania co 1 min – poczekaj, aż skończy.');
+    if (czytaj(L_AD, null)) return alert('Trwa zmiana adresu magazynu – poczekaj, aż skończy.');
+    if (czytaj(L_MC, null)) return alert('Trwa czyszczenie mnożnika ceny – poczekaj, aż skończy.');
+    const stare = czytaj(L_ST, null);
+    if (stare && !(lista && lista.length)) {
+      if (stPracuje) return alert('Sprawdzanie stanu właśnie leci w tej karcie – zobacz panel.');
+      const ile = Math.min(stare.i, stare.lista.length) + '/' + stare.lista.length;
+      if (confirm('Jest niedokończone sprawdzanie „zakończ ofertę przy stanie” (' + ile + ') – pewnie przerwane.\n\nOK = dokończ od ' + ile + '\nAnuluj = wyczyść i zacznij od nowa')) {
+        log('0️⃣ wznawiam niedokończone: ' + ile); rysujPanel(); return stanBieg();
+      }
+      localStorage.removeItem(L_ST); localStorage.removeItem('nsStanStart'); log('0️⃣ wyczyszczone niedokończone zadanie'); rysujPanel();
+    }
+    if (!naStronie('/list_integrations.php')) { localStorage.setItem('nsStanStart', '1'); log('0️⃣ przechodzę na listę integracji…'); idz('/list_integrations.php'); return; }
+    if (!await czekajNaFunkcje('openIntegrationSettings')) return alert('Nie wczytała się lista integracji');
+    await czekaj(1000);
+    lista = (lista && lista.length) ? lista : kontaAllegro();
+    if (!lista.length) return alert('Nie widzę żadnej integracji Allegro na liście');
+    if (!confirm('Sprawdzić i poprawić „Zakończ ofertę przy stanie = 0” w integracjach Allegro: ' + lista.length + '\n\n' + lista.map(x => x.sklep).join(', ').slice(0, 400)
+      + '\n\nGdzie już jest 0 – nic nie rusza. Nic innego w ustawieniach się nie zmienia.\nStrony nie przełączaj w trakcie.')) return;
+    pisz(L_ST, { lista, i: 0, wyniki: [], start: Date.now(), host: location.host });
+    log('0️⃣ START: ' + lista.length + ' integracji Allegro');
+    rysujPanel(); stanBieg();
+  }
+  let stPracuje = false;
+  async function stanBieg() {
+    if (stPracuje) return; stPracuje = true; bezOkienek();
+    try {
+      if (!await czekajNaFunkcje('openIntegrationSettings')) { log('0️⃣ nie wczytała się lista integracji – odśwież stronę'); return; }
+      await czekaj(1500);
+      for (;;) {
+        const j = czytaj(L_ST, null); if (!j) return;
+        if (j.stop || j.i >= j.lista.length) break;
+        const it = j.lista[j.i];
+        let wyn;
+        try { wyn = await stanJednej(it); } catch (e) { wyn = { stan: 'blad', info: 'błąd: ' + (e && e.message || e) }; }
+        const j2 = czytaj(L_ST, null); if (!j2) return;
+        j2.wyniki.push({ ...it, ...wyn }); j2.i++; pisz(L_ST, j2);
+        log('0️⃣ ' + (wyn.stan === 'zmienione' ? '✔' : wyn.stan === 'blad' ? '❌' : '·') + ' ' + it.sklep + ' – ' + (wyn.info || wyn.stan));
+        rysujPanel();
+      }
+      const j = czytaj(L_ST, null); if (!j) return;
+      await zamknijModal();
+      pisz(L_ST_W, { ...j, koniec: Date.now() }); localStorage.removeItem(L_ST);
+      const ile = st => j.wyniki.filter(w => w.stan === st).length;
+      log('0️⃣ KONIEC: poprawione ' + ile('zmienione') + ', już było ' + ile('juz') + ', błędy ' + ile('blad') + (j.stop ? ' (zatrzymane)' : ''));
+      powiadom('Zakończ ofertę przy stanie = 0 – koniec', 'poprawione ' + ile('zmienione') + ', już było ' + ile('juz') + ', błędy ' + ile('blad'), ile('blad') ? 4 : 3);
+      rysujPanel(); oknoStanWynik();
+    } finally { stPracuje = false; }
+  }
+  async function stanJednej(it) {
+    const otworz = async () => {
+      await zamknijModal(); await czekaj(500);
+      W.openIntegrationSettings('allegro', it.id);
+      if (!await czekajNa(() => document.getElementById('gallery_images_sort'), 30000)) return null;
+      await czekaj(2000);
+      const l = document.querySelector('a[href="#' + ST_TAB + '"]'); if (l) l.click();
+      const pane = await czekajNa(() => { const p = document.getElementById(ST_TAB); return p && p.querySelector('[id="' + ST_KOTWICA + '"]') ? p : null; }, 30000);
+      await czekaj(1200);
+      return pane;
+    };
+    let pane = await otworz();
+    if (!pane) { await zamknijModal(); return { stan: 'blad', info: 'nie otworzyła się zakładka Stany' }; }
+    const w = await zeroWStanie(pane);
+    if (w.juz) { await zamknijModal(); return { stan: 'juz', info: 'już było 0' }; }
+    if (w.brakPola) { await zamknijModal(); return { stan: 'blad', info: w.info }; }
+    const bylo = w.info;
+    if (!w.ok) { await zamknijModal(); return { stan: 'blad', info: w.info }; }
+    const zap = pane.querySelector('.btn_form_save');
+    if (!zap) { await zamknijModal(); return { stan: 'blad', info: 'brak przycisku Zapisz' }; }
+    zap.click(); await czekaj(4000);
+    pane = await otworz();                                   // sprawdzenie po zapisie
+    const teraz = wartoscStanu(pane);
+    await zamknijModal();
+    return zeroOk(teraz) ? { stan: 'zmienione', info: bylo } : { stan: 'blad', info: 'po zapisie w polu jest „' + teraz + '”' };
+  }
+  function oknoStanWynik() {
+    const j = czytaj(L_ST_W, null); if (!j) return alert('Brak wyniku');
+    document.querySelectorAll('.ns-st-okno').forEach(x => x.remove());
+    const kol = { zmienione: ['✅', 'poprawione na 0', '#7ee2a8'], juz: ['✔', 'już było 0', '#90caf9'], blad: ['❌', 'błąd', '#ff8a87'] };
+    const ile = st => j.wyniki.filter(w => w.stan === st).length;
+    const reszta = j.lista.length - j.wyniki.length;
+    const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">0️⃣ Zakończ ofertę przy stanie = 0 – podsumowanie${j.stop ? ' <span style="color:#ffb74d">(zatrzymane)</span>' : ''}</div>
+      <div style="margin-bottom:10px">${Object.entries(kol).map(([k, [i, t, c]]) => '<span style="color:' + c + ';margin-right:14px">' + i + ' ' + t + ': <b>' + ile(k) + '</b></span>').join('')}${reszta ? '<span style="opacity:.7">· nie sprawdzone: ' + reszta + '</span>' : ''}</div>
+      <div style="max-height:55vh;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Menlo,monospace">
+        ${j.wyniki.slice().sort((a, b) => ['blad', 'zmienione', 'juz'].indexOf(a.stan) - ['blad', 'zmienione', 'juz'].indexOf(b.stan)).map(w => '<div>' + kol[w.stan][0] + ' ' + esc(w.sklep) + ' <span style="color:' + kol[w.stan][2] + '">– ' + esc(w.info || '') + '</span></div>').join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        ${ile('blad') || reszta ? `<button id="st-powt" style="${przycisk('#6a1b9a')}">🔁 Powtórz błędy${reszta ? ' + nie sprawdzone' : ''}</button>` : ''}
+        <button id="st-zamknij" style="${przycisk('#555')}">Zamknij</button></div>`);
+    o.classList.add('ns-st-okno');
+    o.querySelector('#st-zamknij').onclick = () => o.remove();
+    const pw = o.querySelector('#st-powt'); if (pw) pw.onclick = () => { const zrob = new Set(j.wyniki.map(w => w.id)); o.remove(); startStan([...j.wyniki.filter(w => w.stan === 'blad').map(({ id, sklep }) => ({ id, sklep })), ...j.lista.filter(x => !zrob.has(x.id))]); };
+  }
+
+  // =====================================================================
   // 📍 ZMIANA ADRESU ODBIORU (magazyn hurtowni) we wszystkich „Wysyłam z Allegro”
   //    Zmienia TYLKO pola odbioru (pickup_*). Nadawcy (sender_*) ani niczego innego nie rusza.
   // =====================================================================
@@ -1540,5 +1718,9 @@
   if (mcZap && naStronie('/list_integrations.php') && (!mcZap.host || mcZap.host === location.host)) setTimeout(mnoznikBieg, 2500);
   else if (mcZap && mcZap.host && mcZap.host !== location.host) log('💰 niedokończone czyszczenie mnożnika jest z ' + mcZap.host + ' – tutaj nie wznawiam');
   else if (localStorage.getItem('nsMnoznikStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsMnoznikStart'); setTimeout(() => startMnoznik(), 2500); }
+  const stZap = czytaj(L_ST, null);
+  if (stZap && naStronie('/list_integrations.php') && (!stZap.host || stZap.host === location.host)) setTimeout(stanBieg, 2500);
+  else if (stZap && stZap.host && stZap.host !== location.host) log('0️⃣ niedokończone sprawdzanie stanu jest z ' + stZap.host + ' – tutaj nie wznawiam');
+  else if (localStorage.getItem('nsStanStart') && naStronie('/list_integrations.php')) { localStorage.removeItem('nsStanStart'); setTimeout(() => startStan(), 2500); }
   if (zad() && !zad().pauza) setTimeout(silnik, 2500);
 })();
