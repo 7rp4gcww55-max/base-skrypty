@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.22-2
+// @version      2026.10.27-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -103,11 +103,11 @@
 
   // FINALNE wystawiane grupami tagów – każda grupa ma swój cennik wysyłki (szukany po ostatnim słowie nazwy cennika).
   // Kolejność: najpierw cała grupa DUŻE, potem KURIER, potem PACZKOMAT. Inne tagi (np. MULTIPACZKA) nie są brane.
-  // STARE TAGI (z poprzedniego nazewnictwa) idą razem z nowymi: PUNKT-KURIER → KURIER, PACZKOMAT-PUNKT-KURIER → PACZKOMAT.
+  // STARE TAGI (z poprzedniego nazewnictwa) idą razem z nowymi: KURIER → KURIER, PUNKT-KURIER → KURIER, PACZKOMAT-PUNKT-KURIER → PACZKOMAT.
   // Tagu, którego w danym katalogu nie ma, skrypt nie wymaga – bierze te, które są (stop tylko gdy nie ma ŻADNEGO z grupy).
   const GRUPY_FINALNE = [
     { nazwa: 'DUŻE',      tagi: ['LOG:GABARYT', 'LOG:PALETA'],                          cennik: 'DUZE' },
-    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD', 'PUNKT-KURIER'], cennik: 'KURIER' },
+    { nazwa: 'KURIER',    tagi: ['LOG:KURIER-NST', 'LOG:KURIER-STD', 'KURIER', 'PUNKT-KURIER'], cennik: 'KURIER' },
     { nazwa: 'PACZKOMAT', tagi: ['LOG:PACZKOMAT-A', 'LOG:PACZKOMAT-B', 'LOG:PACZKOMAT-C', 'PACZKOMAT-PUNKT-KURIER'], cennik: 'PACZKOMAT' }
   ];
 
