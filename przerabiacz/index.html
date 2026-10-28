@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRZERABIACZ-4000</title>
+<style>
+  :root{--bg:#1f2428;--card:#2b3138;--line:#3d454d;--txt:#e8ecef;--mut:#9aa5ae;--acc:#2a93c9;--ok:#2fa866;--bad:#d9534f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:24px}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--mut);margin-bottom:16px}
+  .top{display:flex;gap:16px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+  .bank{border-color:var(--ok)}
+  .bank h3{color:var(--ok)}
+  .head{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+  .bname{background:transparent;border:1px solid transparent;border-radius:6px;color:var(--acc);font-size:18px;font-weight:700;padding:4px 8px;flex:1;min-width:0}
+  .bname:hover,.bname:focus{border-color:var(--line);outline:none}
+  h3{font-size:14px;margin:16px 0 8px;color:var(--acc);text-transform:uppercase;letter-spacing:.04em}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--mut);cursor:pointer;transition:.15s}
+  .drop.over{border-color:var(--acc);color:var(--txt)}
+  button{background:var(--acc);color:#fff;border:0;border-radius:7px;padding:9px 14px;font-size:14px;cursor:pointer}
+  button.sec{background:#3d454d}
+  button.okb{background:var(--ok)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  textarea{width:100%;min-height:110px;background:#1b1f23;color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:10px;font:13px ui-monospace,Menlo,monospace}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+  th{color:var(--mut);font-weight:600}
+  .files div{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)}
+  .big{font-size:30px;font-weight:700;line-height:1.1}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .fname{background:#1b1f23;color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:8px 10px;min-width:280px;font-size:14px}
+  .msg{margin-top:8px}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .mut{color:var(--mut)}
+  label.chk{display:flex;gap:8px;align-items:center;color:var(--mut)}
+  .num,.sel{background:#1b1f23;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:14px}
+  .num{width:64px}
+  .errbox{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:10px 14px;border-radius:8px;background:#1b1f23;border:1px solid var(--line)}
+  .errbox .big{font-size:24px}
+  td.long{color:var(--bad);font-weight:700}
+  td.fit{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Generator nowych EAN i tytułów</h1>
+  <div class="sub">Każdy box to osobna paczka: własne pliki, własne EAN-y, własny plik wynikowy do pobrania.</div>
+
+  <div class="top">
+    <button id="addBox">+ Nowy box</button>
+    <div><span class="mut">Razem produktów we wszystkich boxach:</span> <b id="grand">0</b></div>
+    <div style="flex-basis:100%" class="mut">Ustawienia tytułów (te same dla wszystkich boxów):</div>
+    <label class="chk" title="Dodaje do pliku ostatnią kolumnę TAG PRZE z wartością PRZEROBIONE i dzisiejszą datą, np. PRZEROBIONE (07.10.2026)."><input type="checkbox" id="addTag" checked> dodaj kolumnę TAG PRZE (PRZEROBIONE + dzisiejsza data)</label>
+    <label class="chk" title="Zaznaczone: przy losowaniu pomijane są słowa krótsze niż 3 znaki (np. M, XL, S) i same liczby (np. 85, 60)."><input type="checkbox" id="skipShort" checked> pomijaj krótkie słowa i liczby</label>
+    <label class="chk" title="Dodaje do CSV kolumnę ZNAKI (długość nowej nazwy ze spacjami), zaraz po NOWA NAZWA."><input type="checkbox" id="addLen"> dodaj kolumnę ZNAKI do CSV</label>
+    <div style="flex-basis:100%;height:0"></div>
+    <label class="chk">Słów w tytule: <input type="number" id="nWords" class="num" min="1" max="30" value="3"></label>
+    <label class="chk">+ na końcu:
+      <select id="eanMode" class="sel"><option value="full">cały EAN</option><option value="last" selected>ostatnie cyfry EAN</option></select>
+      <span id="digWrap">ile cyfr: <input type="number" id="eanDigits" class="num" min="1" max="14" value="6"></span>
+    </label>
+    <label class="chk">Limit znaków: <input type="number" id="maxLen" class="num" min="1" max="500" value="75"></label>
+    <label class="chk" title="Jeśli CSV wyjdzie większy, zostanie od razu podzielony na części (każda z nagłówkiem): nazwa-czesc-1.csv, nazwa-czesc-2.csv itd.">Max plik: <input type="number" id="maxMB" class="num" min="0.1" max="500" step="0.5" value="5"> MB (większe dzielę na części)</label>
+    <div style="flex-basis:100%" class="mut">Przykład: <b id="example" style="color:var(--txt)"></b></div>
+  </div>
+
+  <div class="card bank">
+    <h3 style="margin-top:0">Bank EAN-ów (zapisany na stałe w tej przeglądarce)</h3>
+    <div class="row" style="margin-top:0;gap:30px">
+      <div><div class="mut">Dostępne</div><div class="big ok" id="bankFree">0</div></div>
+      <div><div class="mut">Zużyte</div><div class="big" id="bankUsed">0</div></div>
+    </div>
+    <div class="mut" style="margin:10px 0 8px">Dosypuj EAN-y (po jednym w linii) i klikaj „Dodaj do banku”. Duplikaty, już zużyte i EAN-y z błędną cyfrą kontrolną są pomijane. EAN jest oznaczany jako zużyty dopiero, gdy pobierzesz CSV boxa, w którym go użyto.</div>
+    <textarea id="bankIn" placeholder="Wklej EAN-y do dosypania do banku..."></textarea>
+    <div class="row">
+      <button class="okb" id="bankAdd">Dodaj do banku</button>
+      <button class="sec" id="bankFileBtn">Dosyp z pliku (.txt/.csv) / wczytaj kopię (.json)</button>
+      <input type="file" id="bankFile" accept=".csv,.txt,.tsv,.json" hidden>
+    </div>
+    <div class="row">
+      <button class="sec" id="bankExport">Zrób kopię zapasową (.json)</button>
+      <button class="sec" id="bankFreeTxt">Pobierz wolne EAN-y (.txt)</button>
+      <button class="sec" id="bankClear" style="margin-left:auto">Wyczyść bank</button>
+    </div>
+    <div class="msg" id="bankMsg"></div>
+    <div class="files mut" id="bankHist" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Wspólne EAN-y dla wszystkich boxów</h3>
+    <div class="mut" style="margin-bottom:8px">Wklej tu EAN-y, po jednym w linii. Pierwsze trafią do boxa 1 (tyle, ile ma produktów), kolejne do boxa 2 itd. Potrzeba razem: <b id="allNeed">0</b>.</div>
+    <textarea id="allEans" placeholder="Wklej EAN-y dla wszystkich boxów naraz..."></textarea>
+    <div class="row">
+      <button class="okb" id="allBank">Weź EAN-y z banku dla wszystkich boxów</button>
+      <button id="allGen">Generuj japońskie EAN-y dla wszystkich boxów</button>
+      <button class="sec" id="allFileBtn">Wczytaj EAN-y z pliku</button>
+      <input type="file" id="allFile" accept=".csv,.txt,.tsv" hidden>
+      <button class="sec" id="allSplit">Rozdziel na boxy</button>
+    </div>
+    <div id="allStat" class="mut" style="margin-top:6px"></div>
+    <h3>Moduł dla wszystkich boxów: nowe tytuły + EAN</h3>
+    <div class="row">
+      <button id="allRun">Generuj pliki dla wszystkich boxów</button>
+      <button class="sec" id="allDl" disabled>Pobierz wszystkie (osobne pliki)</button>
+    </div>
+    <div class="msg" id="allMsg"></div>
+  </div>
+
+  <div id="boxes"></div>
+</div>
+
+<script>
+// ---------- CSV ----------
+function stripBom(s){return s.charCodeAt(0)===0xFEFF?s.slice(1):s}
+function detectDelim(line){
+  const c={';':0,',':0,'\t':0};let q=false;
+  for(const ch of line){if(ch==='"')q=!q;else if(!q&&ch in c)c[ch]++}
+  return Object.keys(c).sort((a,b)=>c[b]-c[a])[0];
+}
+function parseCSV(text){
+  text=stripBom(text);
+  const d=detectDelim(text.split(/\r?\n/)[0]||'');
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){f+='"';i++} else q=false }
+      else f+=ch;
+    }else{
+      if(ch==='"')q=true;
+      else if(ch===d){row.push(f);f=''}
+      else if(ch==='\n'||ch==='\r'){
+        if(ch==='\r'&&text[i+1]==='\n')i++;
+        row.push(f);f='';
+        if(row.some(x=>x!==''))rows.push(row);
+        row=[];
+      } else f+=ch;
+    }
+  }
+  row.push(f);
+  if(row.some(x=>x!==''))rows.push(row);
+  return rows;
+}
+function rowsToProducts(rows){
+  if(!rows.length)return [];
+  const h=rows[0].map(x=>x.trim().toLowerCase());
+  let idx={id:h.indexOf('id'),nazwa:h.indexOf('nazwa'),ean:h.indexOf('ean'),sku:h.indexOf('sku')};
+  let start=1;
+  if(idx.id<0&&idx.nazwa<0&&idx.ean<0&&idx.sku<0){idx={id:0,nazwa:1,ean:2,sku:3};start=0}
+  const g=(r,k)=>idx[k]>=0&&r[idx[k]]!==undefined?String(r[idx[k]]).trim():'';
+  const out=[];
+  for(let i=start;i<rows.length;i++){
+    const r=rows[i];
+    const p={id:g(r,'id'),nazwa:g(r,'nazwa'),ean:g(r,'ean'),sku:g(r,'sku')};
+    if(p.id||p.nazwa||p.ean||p.sku)out.push(p);
+  }
+  return out;
+}
+const esc=v=>'"'+String(v).replace(/"/g,'""')+'"';
+const htm=v=>String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>n.toLocaleString('pl-PL');
+function $(id){return document.getElementById(id)}
+// zapis pliku: lokalnie zwykłym linkiem, na claude.ai przez mechanizm pobierania
+function anchorSave(content,name,type){
+  const blob=new Blob([content],{type});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();
+}
+let CLDL=null;
+const CLDLready=(window.claude&&window.claude.use)
+  ? Promise.resolve(window.claude.use('downloads')).then(d=>{CLDL=d}).catch(()=>{})
+  : Promise.resolve();
+async function doSave(content,name,type){
+  await CLDLready;
+  if(CLDL){
+    try{ await CLDL.save({filename:name,data:new Blob([content],{type})}); return }
+    catch(e){ if(e&&e.code==='declined')return; }
+  }
+  anchorSave(content,name,type);
+}
+// kolejka pobrań: po kolei, żeby nie nachodziły na siebie potwierdzenia / blokady przeglądarki
+const dlQueue=[];let dlBusy=false;
+function queueSave(content,name,type){dlQueue.push([content,name,type]);if(!dlBusy)pumpDl()}
+async function pumpDl(){
+  dlBusy=true;
+  while(dlQueue.length){
+    const j=dlQueue.shift();
+    try{ await doSave(...j) }catch(e){}
+    await new Promise(r=>setTimeout(r,300));
+  }
+  dlBusy=false;
+}
+function saveBlob(content,name,type){queueSave(content,name,type)}
+// dzieli CSV na części po max maxBytes (każda część: BOM + nagłówek + wiersze)
+const enc=new TextEncoder();
+function splitCsv(head,lines,maxBytes){
+  const base=3+enc.encode(head).length+2;
+  const parts=[];let cur=[],size=base;
+  for(const l of lines){
+    const lb=enc.encode(l).length+2;
+    if(cur.length&&size+lb>maxBytes){parts.push(cur);cur=[];size=base}
+    cur.push(l);size+=lb;
+  }
+  if(cur.length||!parts.length)parts.push(cur);
+  return parts.map(p=>'﻿'+head+'\r\n'+p.join('\r\n')+(p.length?'\r\n':''));
+}
+function maxBytes(){return Math.round((parseFloat(String($('maxMB').value).replace(',','.'))||5)*1000*1000)}
+function nowStr(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+// ---------- tytuły ----------
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+function cfg(){
+  return {
+    n:clamp(parseInt($('nWords').value)||3,1,30),
+    mode:$('eanMode').value,
+    digits:clamp(parseInt($('eanDigits').value)||6,1,14),
+    max:clamp(parseInt($('maxLen').value)||75,1,500),
+    skip:$('skipShort').checked
+  };
+}
+// końcówka tytułu: cały EAN albo ostatnie N cyfr
+function eanSuffix(ean,c){return c.mode==='last'?String(ean).slice(-c.digits):String(ean)}
+// długość tytułu w znakach, razem ze spacjami
+function clen(s){return [...String(s)].length}
+function makeTitle(nazwa,ean,c){
+  let words=nazwa.split(/\s+/).map(w=>w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,'')).filter(Boolean);
+  if(c.skip){
+    const f=words.filter(w=>w.length>=3&&!/^\d+$/.test(w));
+    if(f.length>=c.n)words=f;
+  }
+  const idxs=shuffle(words.map((_,i)=>i)).slice(0,c.n);
+  return (idxs.map(i=>words[i]).join(' ')+' '+eanSuffix(ean,c)).trim();
+}
+// losuje kilka razy i zwraca pierwszy tytuł mieszczący się w limicie (albo najkrótszy)
+function makeFitTitle(nazwa,ean,c,tries){
+  let best=null;
+  for(let t=0;t<tries;t++){
+    const s=makeTitle(nazwa,ean,c);
+    if(best===null||clen(s)<clen(best))best=s;
+    if(clen(best)<=c.max)break;
+  }
+  return best;
+}
+function updExample(){
+  const c=cfg();
+  $('digWrap').style.display=c.mode==='last'?'':'none';
+  const s=makeTitle('Krzesło tapicerowane welurowe do jadalni nowoczesne szare','4901234567894',c);
+  $('example').textContent=s+'  ('+clen(s)+' zn.)';
+}
+function parseEans(text){
+  return text.split(/[\r\n]+/).map(l=>{const m=l.match(/\d{8,14}/);return m?m[0]:null}).filter(Boolean);
+}
+
+// ---------- generator japońskich EAN-ów (jedna pula na box) ----------
+function checkDigit(p){
+  let s=0,w=3;
+  for(let i=p.length-1;i>=0;i--){s+=(p.charCodeAt(i)-48)*w;w=w===3?1:3}
+  return String((10-s%10)%10);
+}
+function validEan(e){
+  if(!/^(\d{8}|\d{12,14})$/.test(e))return false;
+  return checkDigit(e.slice(0,-1))===e.slice(-1);
+}
+function genJapanEans(n,exclude){
+  if(n>100000)return null;
+  const seen=new Set(exclude);
+  for(let t=0;t<200;t++){
+    const pre=String((Math.random()<0.5?450:490)+Math.floor(Math.random()*10));
+    let comp='';
+    for(let i=0;i<4;i++)comp+=Math.floor(Math.random()*10);
+    const prefix=pre+comp;
+    const start=Math.floor(Math.random()*(100000-n+1));
+    const list=[];let clash=false;
+    for(let i=0;i<n;i++){
+      const p=prefix+String(start+i).padStart(5,'0');
+      const c=p+checkDigit(p);
+      if(seen.has(c)){clash=true;break}
+      list.push(c);
+    }
+    if(!clash)return {list,prefix};
+  }
+  return null;
+}
+
+// ---------- BANK EAN-ów (localStorage) ----------
+const BANK_KEY='przerabiacz_eanBank_v1';
+function loadBank(){
+  try{
+    const b=JSON.parse(localStorage.getItem(BANK_KEY));
+    if(b&&Array.isArray(b.free))return {free:b.free,used:Array.isArray(b.used)?b.used:[]};
+  }catch(e){}
+  return {free:[],used:[]};
+}
+let bank=loadBank();
+function usedSet(){const s=new Set();for(const b of bank.used)for(const e of b.eans)s.add(e);return s}
+function usedCount(){return bank.used.reduce((s,b)=>s+b.eans.length,0)}
+function bankMsg(html){$('bankMsg').innerHTML=html}
+function saveBank(){
+  try{localStorage.setItem(BANK_KEY,JSON.stringify(bank));return true}
+  catch(e){bankMsg('<span class="bad">Nie udało się zapisać banku (brak miejsca albo przeglądarka blokuje zapis). Zrób kopię zapasową .json.</span>');return false}
+}
+function renderBank(){
+  $('bankFree').textContent=fmt(bank.free.length);
+  $('bankUsed').textContent=fmt(usedCount());
+  const last=bank.used.slice(-5).reverse();
+  $('bankHist').innerHTML=last.length?'<div style="border:0"><b>Ostatnio zużyte:</b><span></span></div>'+
+    last.map(b=>`<div><span>${htm(b.box)}</span><span>${fmt(b.eans.length)} szt. · ${htm(b.d)}</span></div>`).join(''):'';
+}
+function addToBank(list){
+  const free=new Set(bank.free),used=usedSet();
+  let added=0,dup=0,usedSkip=0,bad=0;
+  for(const raw of list){
+    const e=String(raw).trim();
+    if(!validEan(e)){bad++;continue}
+    if(used.has(e)){usedSkip++;continue}
+    if(free.has(e)){dup++;continue}
+    free.add(e);bank.free.push(e);added++;
+  }
+  saveBank();renderBank();
+  return {added,dup,usedSkip,bad};
+}
+function addReport(r){
+  const parts=[`<span class="ok">Dodano do banku: ${fmt(r.added)}.</span>`];
+  if(r.dup)parts.push(`<span class="mut">Duplikaty pominięte: ${fmt(r.dup)}.</span>`);
+  if(r.usedSkip)parts.push(`<span class="bad">Już zużyte, pominięte: ${fmt(r.usedSkip)}.</span>`);
+  if(r.bad)parts.push(`<span class="bad">Błędna cyfra kontrolna / format, pominięte: ${fmt(r.bad)}.</span>`);
+  bankMsg(parts.join(' '));
+}
+// bierze n wolnych EAN-ów z banku (nie zużywa ich), pomijając te z exclude
+function takeFromBank(n,exclude){
+  const ex=new Set(exclude||[]),out=[];
+  for(const e of bank.free){if(out.length>=n)break;if(!ex.has(e))out.push(e)}
+  return out;
+}
+// oznacza EAN-y jako zużyte (tylko te, które są w banku)
+function markUsed(eans,boxName){
+  const s=new Set(eans);
+  const hit=bank.free.filter(e=>s.has(e));
+  if(!hit.length)return 0;
+  bank.free=bank.free.filter(e=>!s.has(e));
+  bank.used.push({d:nowStr(),box:boxName,eans:hit});
+  saveBank();renderBank();
+  return hit.length;
+}
+function importBackup(obj){
+  const used=usedSet();
+  for(const b of (obj.used||[])){
+    const e=(b.eans||[]).filter(x=>validEan(x)&&!used.has(x));
+    if(e.length){bank.used.push({d:b.d||'?',box:b.box||'?',eans:e});e.forEach(x=>used.add(x))}
+  }
+  bank.free=bank.free.filter(e=>!used.has(e));
+  return addToBank(obj.free||[]);
+}
+
+$('bankAdd').onclick=()=>{
+  const list=parseEans($('bankIn').value);
+  if(!list.length){bankMsg('<span class="bad">Najpierw wklej EAN-y.</span>');return}
+  addReport(addToBank(list));
+  $('bankIn').value='';
+};
+$('bankFileBtn').onclick=()=>$('bankFile').click();
+$('bankFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const txt=await readFile(f);e.target.value='';
+  if(/\.json$/i.test(f.name)){
+    try{
+      const obj=JSON.parse(stripBom(txt));
+      if(!obj||!Array.isArray(obj.free))throw 0;
+      const r=importBackup(obj);
+      bankMsg('<span class="ok">Wczytano kopię zapasową (połączona z obecnym bankiem).</span> ');
+      $('bankMsg').innerHTML+=`<span class="mut">Nowych wolnych: ${fmt(r.added)}.</span>`;
+    }catch(err){bankMsg('<span class="bad">To nie jest poprawna kopia banku (.json).</span>')}
+    return;
+  }
+  addReport(addToBank(parseEans(txt)));
+};
+$('bankExport').onclick=()=>{
+  saveBlob(JSON.stringify({wersja:1,zapisano:nowStr(),free:bank.free,used:bank.used},null,1),
+    'bank-ean-'+new Date().toISOString().slice(0,10)+'.json','application/json');
+  bankMsg('<span class="ok">Pobrano kopię zapasową banku.</span>');
+};
+$('bankFreeTxt').onclick=()=>{
+  if(!bank.free.length){bankMsg('<span class="bad">Bank jest pusty.</span>');return}
+  saveBlob(bank.free.join('\r\n')+'\r\n','wolne-ean-'+new Date().toISOString().slice(0,10)+'.txt','text/plain');
+};
+$('bankClear').onclick=()=>{
+  if(!bank.free.length&&!bank.used.length)return;
+  if(!confirm(`Wyczyścić cały bank? (${fmt(bank.free.length)} wolnych, ${fmt(usedCount())} zużytych)\nNajpierw zrób kopię zapasową, jeśli jest potrzebna.`))return;
+  bank={free:[],used:[]};saveBank();renderBank();
+  bankMsg('<span class="mut">Bank wyczyszczony.</span>');
+};
+
+// ---------- boxy ----------
+const boxes=[];
+let seq=0;
+const readFile=f=>new Promise(r=>{const x=new FileReader();x.onload=()=>r(x.result);x.readAsText(f,'utf-8')});
+
+function tagText(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return 'PRZEROBIONE ('+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+')';
+}
+function renumber(){
+  boxes.forEach((b,i)=>{
+    if(b.autoName){b.name='Box '+(i+1);b.nameInput.value=b.name;b.syncFname()}
+  });
+}
+function updateGrand(){
+  $('grand').textContent=fmt(boxes.reduce((s,b)=>s+b.products.length,0));
+  updAllStat();
+}
+
+function createBox(){
+  const box={id:++seq,name:'Box '+(boxes.length+1),autoName:true,files:[],products:[],result:[]};
+  const el=document.createElement('div');
+  el.className='card';
+  el.innerHTML=`
+    <div class="head"><input class="bname" value="${htm(box.name)}" aria-label="Nazwa boxa"><button class="sec del">Usuń box</button></div>
+    <div class="drop">Przeciągnij tu pliki CSV z Base albo kliknij (można kilka naraz)</div>
+    <input type="file" class="finp" accept=".csv,.txt,.tsv" multiple hidden>
+    <div class="files" style="margin-top:10px"></div>
+    <div class="row">
+      <div><div class="mut">Produktów w boxie</div><div class="big total">0</div></div>
+      <div class="mut dupinfo"></div>
+      <div style="margin-left:auto"><button class="sec clr">Wyczyść pliki</button></div>
+    </div>
+    <h3>Nowe EAN-y (potrzeba: <b class="need">0</b>)</h3>
+    <textarea class="eans" placeholder="Wklej tu EAN-y, jeden w linii. Pierwszy trafi do pierwszej pozycji, drugi do drugiej itd."></textarea>
+    <div class="row">
+      <button class="okb bankget">Weź z banku</button>
+      <button class="genj">Generuj japońskie EAN-y (tyle co produktów)</button>
+      <button class="sec eanfile">Wczytaj EAN-y z pliku</button>
+      <input type="file" class="einp" accept=".csv,.txt,.tsv" hidden>
+    </div>
+    <div class="eanstat mut" style="margin-top:6px"></div>
+    <div class="row">
+      <button class="go" disabled>Generuj plik</button>
+      <input class="fname" aria-label="Nazwa pliku" placeholder="nazwa pliku"><span class="mut">.csv</span>
+      <button class="sec dl" disabled>Pobierz CSV tego boxa</button>
+    </div>
+    <div class="msg"></div>
+    <div class="errbox" hidden>
+      <div><div class="mut">Za długich (&gt; <span class="lim">75</span> zn.)</div><div class="big nbad">0</div></div>
+      <div><div class="mut">OK</div><div class="big ok ngood">0</div></div>
+      <div><div class="mut">Najdłuższy</div><div class="big nmax">0</div></div>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="sec reroll">Przelosuj za długie</button>
+        <button class="sec showbad">Pokaż za długie</button>
+      </div>
+    </div>
+    <div style="overflow:auto;margin-top:10px"><table class="prev"></table></div>`;
+  const q=s=>el.querySelector(s);
+  const drop=q('.drop'),finp=q('.finp'),ta=q('.eans'),stat=q('.eanstat');
+
+  function merge(){
+    const seen=new Set();box.products=[];let dups=0;
+    for(const f of box.files)for(const p of f.products){
+      const key=p.id?('id:'+p.id):('ean:'+p.ean);
+      if(seen.has(key)){dups++;continue}
+      seen.add(key);box.products.push(p);
+    }
+    q('.total').textContent=fmt(box.products.length);
+    q('.need').textContent=fmt(box.products.length);
+    q('.dupinfo').textContent=dups?`Pominięto ${fmt(dups)} duplikatów (to samo ID w kilku plikach).`:'';
+    q('.files').innerHTML=box.files.map((f,i)=>`<div><span>${htm(f.name)}</span><span class="mut">${fmt(f.products.length)} szt. <a href="#" data-i="${i}" style="color:var(--bad);margin-left:10px;text-decoration:none">usuń</a></span></div>`).join('');
+    q('.files').querySelectorAll('a').forEach(a=>a.onclick=e=>{e.preventDefault();box.files.splice(+a.dataset.i,1);merge()});
+    box.result=[];q('.dl').disabled=true;q('.prev').innerHTML='';q('.msg').textContent='';q('.errbox').hidden=true;
+    updEan();updateGrand();
+  }
+  function updEan(){
+    const e=parseEans(ta.value),n=box.products.length;
+    if(!e.length){stat.textContent='';stat.className='eanstat mut'}
+    else if(e.length===n){stat.textContent=`✓ ${fmt(e.length)} EAN-ów, zgadza się.`;stat.className='eanstat ok'}
+    else if(e.length<n){stat.textContent=`Za mało: ${fmt(e.length)} z ${fmt(n)} (brakuje ${fmt(n-e.length)}).`;stat.className='eanstat bad'}
+    else{stat.textContent=`Za dużo: ${fmt(e.length)} (nadmiar ${fmt(e.length-n)} zostanie pominięty).`;stat.className='eanstat mut'}
+    q('.go').disabled=!(n>0&&e.length>=n);
+  }
+  async function addFiles(list){
+    for(const f of list){
+      box.files.push({name:f.name,products:rowsToProducts(parseCSV(await readFile(f)))});
+    }
+    merge();
+  }
+
+  drop.onclick=()=>finp.click();
+  finp.onchange=e=>{addFiles([...e.target.files]);e.target.value=''};
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+  drop.addEventListener('drop',e=>addFiles([...e.dataTransfer.files]));
+  q('.clr').onclick=()=>{box.files=[];merge()};
+  ta.oninput=updEan;
+  q('.eanfile').onclick=()=>q('.einp').click();
+  q('.einp').onchange=async e=>{
+    const f=e.target.files[0];if(!f)return;
+    ta.value=parseEans(await readFile(f)).join('\n');
+    e.target.value='';updEan();
+  };
+  q('.bankget').onclick=()=>{
+    const n=box.products.length;
+    if(!n){stat.textContent='Najpierw wrzuć pliki z produktami.';stat.className='eanstat bad';return}
+    // nie bierz EAN-ów, które już siedzą w innych boxach
+    const other=boxes.filter(b=>b!==box).flatMap(b=>b.currentEans());
+    const list=takeFromBank(n,other);
+    ta.value=list.join('\n');updEan();
+    if(list.length<n)stat.innerHTML+=`<br>W banku zabrakło EAN-ów: wzięto ${fmt(list.length)} z ${fmt(n)}. Dosyp do banku.`;
+    else stat.innerHTML+=`<br>Wzięte z banku (zostaną oznaczone jako zużyte po pobraniu CSV).`;
+  };
+  q('.genj').onclick=()=>{
+    if(!box.products.length){stat.textContent='Najpierw wrzuć pliki z produktami.';stat.className='eanstat bad';return}
+    const used=boxes.filter(b=>b!==box).map(b=>b.eanList||[]).flat();
+    const r=genJapanEans(box.products.length,box.products.map(p=>p.ean).concat(used,bank.free,[...usedSet()]));
+    if(!r){stat.textContent='Nie da się zrobić jednej puli dla takiej liczby (max 100 000 produktów).';stat.className='eanstat bad';return}
+    ta.value=r.list.join('\n');
+    updEan();
+    stat.innerHTML+=`<br>Jedna pula, prefiks firmy <b>${r.prefix}</b>. Pierwszy: <b>${r.list[0]}</b>, ostatni: <b>${r.list[r.list.length-1]}</b>.`;
+  };
+  box.onlyBad=false;
+  box.badCount=()=>{const c=cfg();return box.result.filter(r=>clen(r.nowa)>c.max).length};
+  function renderResult(){
+    const c=cfg();
+    box.result.forEach(r=>r.znaki=clen(r.nowa));
+    const bad=box.result.filter(r=>r.znaki>c.max);
+    const mx=box.result.reduce((m,r)=>Math.max(m,r.znaki),0);
+    q('.errbox').hidden=!box.result.length;
+    q('.lim').textContent=c.max;
+    q('.nbad').textContent=fmt(bad.length);
+    q('.nbad').className='big nbad '+(bad.length?'bad':'ok');
+    q('.ngood').textContent=fmt(box.result.length-bad.length);
+    q('.nmax').textContent=mx;
+    q('.nmax').className='big nmax '+(mx>c.max?'bad':'ok');
+    q('.reroll').disabled=!bad.length;
+    if(!bad.length)box.onlyBad=false;
+    q('.showbad').disabled=!bad.length;
+    q('.showbad').textContent=box.onlyBad?'Pokaż pierwsze 5':'Pokaż za długie';
+    const rows=box.onlyBad?bad.slice(0,300):box.result.slice(0,5);
+    const hasTag=box.result.length&&box.result[0].tag;
+    q('.prev').innerHTML='<tr><th>ID</th><th>EAN</th><th>SKU</th><th>STARA NAZWA</th><th>NOWY EAN</th><th>NOWA NAZWA</th><th>ZNAKI</th>'+(hasTag?'<th>TAG PRZE</th>':'')+'</tr>'+
+      rows.map(r=>`<tr><td>${htm(r.id)}</td><td>${htm(r.ean)}</td><td>${htm(r.sku)}</td><td>${htm(r.stara)}</td><td>${htm(r.nowyEan)}</td><td title="${htm(r.nowa)}">${htm(r.nowa)}</td><td class="${r.znaki>c.max?'long':'fit'}">${r.znaki}</td>${hasTag?`<td>${htm(r.tag)}</td>`:''}</tr>`).join('')+
+      (box.onlyBad&&bad.length>300?`<tr><td colspan="8" class="mut">…i ${fmt(bad.length-300)} więcej</td></tr>`:'');
+  }
+  q('.go').onclick=()=>{
+    const e=parseEans(ta.value);
+    const c=cfg();
+    box.eanList=e.slice(0,box.products.length);
+    const used=new Set();let dupE=0;
+    box.result=box.products.map((p,i)=>{
+      const ne=e[i];
+      if(used.has(ne))dupE++;used.add(ne);
+      return {id:p.id,ean:p.ean,sku:p.sku,stara:p.nazwa,nowyEan:ne,nowa:makeTitle(p.nazwa,ne,c),tag:$('addTag').checked?tagText():null};
+    });
+    const warn=[];
+    if(dupE)warn.push(`${dupE} powtórzonych EAN-ów na liście`);
+    const us=usedSet(),wasUsed=box.eanList.filter(x=>us.has(x)).length;
+    if(wasUsed)warn.push(`${wasUsed} EAN-ów było już wcześniej zużytych (wg banku)`);
+    if(c.mode==='last'){
+      const sfx=new Set();let dupS=0;
+      for(const x of box.eanList){const s=eanSuffix(x,c);if(sfx.has(s))dupS++;sfx.add(s)}
+      if(dupS)warn.push(`${dupS} tytułów ma tę samą końcówkę (ostatnie ${c.digits} cyfr się powtarzają)`);
+    }
+    q('.msg').innerHTML=`<span class="ok">Gotowe: ${fmt(box.result.length)} wierszy.</span>`+(warn.length?`<br><span class="bad">Uwaga: ${warn.join('; ')}.</span>`:'');
+    q('.dl').disabled=false;
+    renderResult();
+  };
+  q('.reroll').onclick=()=>{
+    const c=cfg();let fixed=0;
+    for(const r of box.result){
+      if(clen(r.nowa)<=c.max)continue;
+      r.nowa=makeFitTitle(r.stara,r.nowyEan,c,200);
+      if(clen(r.nowa)<=c.max)fixed++;
+    }
+    renderResult();
+    const left=box.badCount();
+    q('.msg').innerHTML+=`<br><span class="${left?'bad':'ok'}">Przelosowano: naprawiono ${fmt(fixed)}${left?`, nadal za długie: ${fmt(left)} (te nazwy mają za długie słowa – zmniejsz liczbę słów albo cyfr)`:''}.</span>`;
+  };
+  q('.showbad').onclick=()=>{box.onlyBad=!box.onlyBad;renderResult()};
+  box.render=renderResult;
+  q('.dl').onclick=()=>{
+    const hasTag=box.result.length&&box.result[0].tag;
+    const addLen=$('addLen').checked;
+    const head=['ID','EAN','SKU','STARA NAZWA','NOWY EAN','NOWA NAZWA'].concat(addLen?['ZNAKI']:[],hasTag?['TAG PRZE']:[]).map(esc).join(';');
+    const body=box.result.map(r=>[r.id,r.ean,r.sku,r.stara,r.nowyEan,r.nowa].concat(addLen?[clen(r.nowa)]:[],hasTag?[r.tag]:[]).map(esc).join(';'));
+    const nm=(q('.fname').value||box.name).replace(/\.csv$/i,'').replace(/[^\p{L}\p{N}_ -]+/gu,'-').trim()||'plik';
+    const parts=splitCsv(head,body,maxBytes());
+    if(parts.length===1)queueSave(parts[0],nm+'.csv','text/csv;charset=utf-8');
+    else parts.forEach((p,i)=>queueSave(p,nm+'-czesc-'+(i+1)+'.csv','text/csv;charset=utf-8'));
+    const mb=b=>(b/1e6).toLocaleString('pl-PL',{maximumFractionDigits:2});
+    q('.msg').innerHTML+=parts.length===1
+      ?`<br><span class="ok">Pobrano 1 plik (${mb(enc.encode(parts[0]).length)} MB).</span>`
+      :`<br><span class="ok">Plik wi\u0119kszy ni\u017C ${mb(maxBytes())} MB, podzielony na ${parts.length} cz\u0119\u015Bci: `+
+        parts.map((p,i)=>`cz. ${i+1} \u2013 ${mb(enc.encode(p).length)} MB`).join(', ')+`.</span> <span class="mut">Je\u015Bli przegl\u0105darka zapyta o wiele pobra\u0144, zatwierd\u017A.</span>`;
+    const n=markUsed(box.eanList||[],box.name);
+    if(n)q('.msg').innerHTML+=`<br><span class="ok">Bank: ${fmt(n)} EAN-ów oznaczonych jako zużyte.</span>`;
+  };
+  q('.del').onclick=()=>{
+    if(box.products.length&&!confirm('Usunąć ten box razem z wczytanymi plikami?'))return;
+    boxes.splice(boxes.indexOf(box),1);el.remove();renumber();updateGrand();
+  };
+
+  box.nameInput=q('.bname');
+  box.fname=q('.fname');box.fnameEdited=false;
+  box.fname.oninput=()=>{box.fnameEdited=true};
+  box.syncFname=()=>{
+    if(!box.fnameEdited)box.fname.value=(box.name+'-'+new Date().toISOString().slice(0,10)).replace(/[^\p{L}\p{N}_ -]+/gu,'-');
+  };
+  box.syncFname();
+  box.nameInput.oninput=()=>{box.autoName=false;box.name=box.nameInput.value;box.syncFname()};
+  box.setEans=list=>{ta.value=list.join('\n');updEan()};
+  box.currentEans=()=>parseEans(ta.value);
+  box.ready=()=>!q('.go').disabled;
+  box.run=()=>q('.go').onclick();
+  box.download=()=>q('.dl').onclick();
+
+  boxes.push(box);
+  $('boxes').appendChild(el);
+  updateGrand();
+}
+
+// ---------- moduł wspólny dla wszystkich boxów ----------
+const allNeed=()=>boxes.reduce((s,b)=>s+b.products.length,0);
+function updAllStat(){
+  const need=allNeed();
+  $('allNeed').textContent=fmt(need);
+  const e=parseEans($('allEans').value),st=$('allStat');
+  if(!e.length){st.textContent='';return}
+  if(e.length===need){st.textContent=`✓ ${fmt(e.length)} EAN-ów, zgadza się z liczbą produktów.`;st.className='ok'}
+  else if(e.length<need){st.textContent=`Za mało: ${fmt(e.length)} z ${fmt(need)} (brakuje ${fmt(need-e.length)}).`;st.className='bad'}
+  else{st.textContent=`Za dużo: ${fmt(e.length)} (nadmiar ${fmt(e.length-need)} zostanie pominięty).`;st.className='mut'}
+}
+function splitAll(){
+  const e=parseEans($('allEans').value);
+  let pos=0;
+  for(const b of boxes){
+    const n=b.products.length;
+    b.setEans(e.slice(pos,pos+n));
+    pos+=n;
+  }
+}
+$('allEans').oninput=updAllStat;
+$('allSplit').onclick=()=>{
+  if(!parseEans($('allEans').value).length){$('allStat').textContent='Najpierw wklej EAN-y.';$('allStat').className='bad';return}
+  splitAll();
+  $('allMsg').innerHTML='<span class="ok">EAN-y rozdzielone na boxy.</span>';
+};
+$('allBank').onclick=()=>{
+  const need=allNeed(),st=$('allStat');
+  if(!need){st.textContent='Najpierw wrzuć pliki do boxów.';st.className='bad';return}
+  const list=takeFromBank(need);
+  $('allEans').value=list.join('\n');
+  splitAll();updAllStat();
+  if(list.length<need)st.innerHTML+=`<br>W banku jest tylko ${fmt(list.length)} wolnych EAN-ów, brakuje ${fmt(need-list.length)}. Ostatnie boxy dostały za mało.`;
+  else st.innerHTML+='<br>Wzięte z banku i rozdzielone na boxy. Zużyte zostaną oznaczone po pobraniu CSV.';
+};
+$('allFileBtn').onclick=()=>$('allFile').click();
+$('allFile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  $('allEans').value=parseEans(await readFile(f)).join('\n');
+  e.target.value='';updAllStat();
+};
+$('allGen').onclick=()=>{
+  const need=allNeed(),st=$('allStat');
+  if(!need){st.textContent='Najpierw wrzuć pliki do boxów.';st.className='bad';return}
+  const old=boxes.flatMap(b=>b.products.map(p=>p.ean)).concat(bank.free,[...usedSet()]);
+  const r=genJapanEans(need,old);
+  if(!r){st.textContent='Nie da się zrobić jednej puli dla takiej liczby (max 100 000 produktów).';st.className='bad';return}
+  $('allEans').value=r.list.join('\n');
+  splitAll();updAllStat();
+  st.innerHTML+=`<br>Jedna pula dla wszystkich boxów, prefiks firmy <b>${r.prefix}</b>. Pierwszy: <b>${r.list[0]}</b>, ostatni: <b>${r.list[r.list.length-1]}</b>.`;
+};
+$('allRun').onclick=()=>{
+  if(parseEans($('allEans').value).length)splitAll();
+  let done=0;
+  for(const b of boxes){
+    if(b.ready()){b.run();done++}
+  }
+  $('allMsg').innerHTML=`<span class="ok">Gotowe boxy: ${done} z ${boxes.length}.</span>`+
+    (done<boxes.length?`<br><span class="bad">Pominięto boxy bez produktów albo z za małą liczbą EAN-ów (sprawdź statusy w boxach).</span>`:'')+
+    badSummary();
+  $('allDl').disabled=done===0;
+};
+function badSummary(){
+  const c=cfg(),withRes=boxes.filter(b=>b.result.length);
+  if(!withRes.length)return '';
+  const total=withRes.reduce((s,b)=>s+b.result.length,0);
+  const bad=withRes.reduce((s,b)=>s+b.badCount(),0);
+  return `<br><span class="${bad?'bad':'ok'}">Tytuły powyżej ${c.max} znaków: <b>${fmt(bad)}</b> z ${fmt(total)}</span>`+
+    (bad?' <span class="mut">(w każdym boxie jest przycisk „Przelosuj za długie”)</span>':'');
+}
+// zmiana ustawień tytułu = przelicz gotowe boxy od nowa
+function onTitleCfg(){
+  updExample();
+  for(const b of boxes)if(b.result.length)b.run();
+  if(boxes.some(b=>b.result.length))$('allMsg').innerHTML='<span class="mut">Ustawienia zmienione, tytuły wygenerowane od nowa.</span>'+badSummary();
+}
+['nWords','eanMode','eanDigits','skipShort'].forEach(id=>$(id).addEventListener('change',onTitleCfg));
+$('maxLen').addEventListener('change',()=>{
+  updExample();
+  for(const b of boxes)if(b.result.length)b.render();
+  if(boxes.some(b=>b.result.length))$('allMsg').innerHTML='<span class="mut">Limit zmieniony.</span>'+badSummary();
+});
+$('allDl').onclick=()=>{
+  const ready=boxes.filter(b=>b.result.length);
+  ready.forEach(b=>b.download());
+  $('allMsg').innerHTML=`<span class="ok">Pobieram ${ready.length} boxów (pliki ponad ${(maxBytes()/1e6).toLocaleString('pl-PL')} MB dzielone na części).</span> Jeśli przeglądarka zapyta o zgodę na wiele pobrań, zatwierdź.`;
+};
+
+$('addBox').onclick=createBox;
+updExample();
+renderBank();
+createBox();
+</script>
+</body>
+</html>
