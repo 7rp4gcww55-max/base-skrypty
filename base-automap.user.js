@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base auto-mapowanie (tryb RĘCZNY / AUTO)
-// @version      2026.10.27-1
+// @version      2026.10.31-1
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
 // @run-at       document-idle
@@ -87,11 +87,15 @@
     { typ: 'idprod', nazwa: 'ID produktyzacji' }
   ];
 
+  // Szablon oferty – ta sama rzecz na różnych kontach ma różną nazwę (na PRIMKS zapisany inaczej niż u nas).
+  // Podajemy kilka nazw po „|” – bot bierze pierwszą, która jest na liście szablonów tego konta.
+  const SZABLON_OFERTY = 'UNIWERSALNY-PO-PRZEROBIENIU-TYT|UNIWERSALNY-PO-PRZE-TYT';
+
   // ===== PROCES 2: FINALNE (wystawianie dobrych produktów) =====
   const KROKI_FINALNE = [
     { typ: 'akcja', nazwa: 'Usuń niedopasowane', wartosc: 'remove_mismatched' },
     { typ: 'cennik', nazwa: 'Cennik wysyłki' },     // DUZE / KURIER / PACZKOMATY – zależnie od grupy tagów paczki
-    { typ: 'wybor', nazwa: 'Szablon oferty', wartosc: 'UNIWERSALNY-PO-PRZEROBIENIU-TYT',
+    { typ: 'wybor', nazwa: 'Szablon oferty', wartosc: SZABLON_OFERTY,
       sciezka: 'siteItems.pl.marketplaceParams.theme.value', zrodlo: 'sites.pl.marketplaceParams.theme.options' },
     { typ: 'wybor', nazwa: 'Wyrób medyczny', wartosc: 'nie' },
     { typ: 'wybor', nazwa: 'Stan', wartosc: 'Nowy' }
@@ -173,6 +177,19 @@
     if (!p || typeof p !== 'object' || !Object.keys(p).length) {
       p = { 'Domyślny': { przerobki: kopiaKrokow(KROKI_PRZEROBKI), finalne: kopiaKrokow(KROKI_FINALNE) } };
     }
+    // stare profile mają w sobie wpisaną jedną nazwę szablonu – podmień na listę nazw (obsługa PRIMKS + naszych kont)
+    let zmieniono = false;
+    for (const prof of Object.values(p)) {
+      for (const proces of ['przerobki', 'finalne']) {
+        for (const k of (prof && prof[proces]) || []) {
+          if (k && k.nazwa === 'Szablon oferty' && typeof k.wartosc === 'string'
+              && /^UNIWERSALNY-PO-PRZE/i.test(k.wartosc) && k.wartosc.indexOf('|') === -1) {
+            k.wartosc = SZABLON_OFERTY; zmieniono = true;
+          }
+        }
+      }
+    }
+    if (zmieniono) { try { localStorage.setItem(L_PROFILE, JSON.stringify(p)); } catch {} }
     return p;
   }
   const zapiszProfile = p => localStorage.setItem(L_PROFILE, JSON.stringify(p));
@@ -630,7 +647,7 @@
     { nazwa: 'Waga produktu z opakowaniem jednostkowym', typ: 'mapuj', regula: null },
     { nazwa: 'Stan', typ: 'wybor', wartosc: 'Nowy' },
     { nazwa: 'Wyrób medyczny', typ: 'wybor', wartosc: 'nie' },
-    { nazwa: 'Szablon oferty', typ: 'wybor', wartosc: 'UNIWERSALNY-PO-PRZEROBIENIU-TYT', sciezka: 'siteItems.pl.marketplaceParams.theme.value', zrodlo: 'sites.pl.marketplaceParams.theme.options' },
+    { nazwa: 'Szablon oferty', typ: 'wybor', wartosc: SZABLON_OFERTY, sciezka: 'siteItems.pl.marketplaceParams.theme.value', zrodlo: 'sites.pl.marketplaceParams.theme.options' },
     { nazwa: 'Usuń niedopasowane', typ: 'akcja', wartosc: 'remove_mismatched' },
     { nazwa: 'Nowy produkt w katalogu', typ: 'akcja', wartosc: 'change_productization_create_new' },
     { nazwa: 'ID produktyzacji', typ: 'idprod' }
@@ -1634,9 +1651,17 @@
       async ustawPole({ sciezka, zrodlo, tekst }) {
         const get = (o, p) => p.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o);
         const opcje = get(activeSettings, zrodlo) || {};
+        // tekst może mieć kilka nazw po "|" (np. szablon inaczej nazwany na PRIMKS) – bierzemy pierwszą, która jest na liście
+        const nazwy = String(tekst).split('|').map(s => s.trim()).filter(Boolean);
         let opt = null;
-        for (const [id, t] of Object.entries(opcje)) if (id !== '_order' && norm(t) === norm(tekst)) { opt = id; break; }
-        if (!opt) for (const [id, t] of Object.entries(opcje)) if (id !== '_order' && id !== '' && norm(t).startsWith(norm(tekst))) { opt = id; break; }
+        for (const n of nazwy) {
+          for (const [id, t] of Object.entries(opcje)) if (id !== '_order' && norm(t) === norm(n)) { opt = id; break; }
+          if (opt) break;
+        }
+        if (!opt) for (const n of nazwy) {
+          for (const [id, t] of Object.entries(opcje)) if (id !== '_order' && id !== '' && norm(t).startsWith(norm(n))) { opt = id; break; }
+          if (opt) break;
+        }
         if (!opt) return { pola: 0, zmienione: 0, brakOpcji: 1, zle: 0, opcjeDostepne: Object.values(opcje).filter(x => typeof x === 'string').join(' | ') };
         const czesci = sciezka.split('.'); const rodzic = czesci.slice(0, -1).join('.');
         let pola = 0, zmienione = 0;
@@ -2173,12 +2198,17 @@
     const sel = pole.querySelector('select');
     if (!sel) return { ok: false, powod: 'brak listy' };
     const $ = window.jQuery;
+    // wartość może mieć kilka nazw po "|" (ta sama pozycja bywa inaczej nazwana na różnych kontach) – pasuje którakolwiek
+    const nazwy = String(wartosc).split('|').map(s => s.trim()).filter(Boolean);
+    const pasuje = t => nazwy.some(n => norm(t) === norm(n));
+    const opis = nazwy.join(' / ');
+    const wpisz = nazwy.reduce((a, b) => { let i = 0; while (i < a.length && i < b.length && a[i].toLowerCase() === b[i].toLowerCase()) i++; return a.slice(0, i); });
     const szukajOpcji = () => [...document.querySelectorAll('.select2-results__option')]
-      .find(e => e.offsetParent && norm(e.textContent) === norm(wartosc));
+      .find(e => e.offsetParent && pasuje(e.textContent));
     const zamknij = () => { try { $ && $(sel).hasClass('select2-hidden-accessible') && $(sel).select2('close'); } catch {} };
 
     // już ustawione?
-    if (norm(sel.selectedOptions[0]?.text) === norm(wartosc)) return { ok: true, sel };
+    if (pasuje(sel.selectedOptions[0]?.text)) return { ok: true, sel, tekst: sel.selectedOptions[0].text };
 
     await zamknijWszystkieMenu();
     pole.scrollIntoView({ block: 'center' });
@@ -2202,31 +2232,34 @@
       sposoby[1]();
       const szukaj = await czekajNa(() => { const i = document.querySelector('.select2-container--open .select2-search__field'); return i && i.offsetParent ? i : null; }, 3000);
       if (szukaj) {
-        szukaj.value = wartosc;
+        szukaj.value = wpisz || nazwy[0];           // przy kilku nazwach wpisujemy ich wspólny początek
         szukaj.dispatchEvent(new Event('input', { bubbles: true }));
         szukaj.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
         opcja = await czekajNa(szukajOpcji, 6000);
       }
     }
-    if (!opcja) { zamknij(); return { ok: false, powod: 'brak opcji ' + wartosc }; }
+    if (!opcja) { zamknij(); return { ok: false, powod: 'brak opcji ' + opis }; }
     myszka(opcja, ['mouseover', 'mousedown', 'mouseup', 'click']);
     await czekaj(900);
-    if (norm(sel.selectedOptions[0]?.text) !== norm(wartosc)) { zamknij(); return { ok: false, powod: 'nie wybrało ' + wartosc }; }
-    return { ok: true, sel };
+    if (!pasuje(sel.selectedOptions[0]?.text)) { zamknij(); return { ok: false, powod: 'nie wybrało ' + opis }; }
+    return { ok: true, sel, tekst: sel.selectedOptions[0].text };
   }
+
+  // "A|B" = ta sama pozycja pod różnymi nazwami (np. szablon inaczej nazwany na PRIMKS) – do pokazania w statusie
+  const opisWartosci = w => String(w).split('|').map(s => s.trim()).filter(Boolean).join(' / ');
 
   async function zrobWybor(k, pole) {
     if (await mostOk()) {
-      status('ustawiam ' + k.nazwa + ' = ' + k.wartosc + ' we wszystkich produktach…');
+      status('ustawiam ' + k.nazwa + ' = ' + opisWartosci(k.wartosc) + ' we wszystkich produktach…');
       const r = k.sciezka
         ? await bazaBase('ustawPole', { sciezka: k.sciezka, zrodlo: k.zrodlo, tekst: k.wartosc })
         : await bazaBase('ustawListe', { nazwa: k.nazwa, tekst: k.wartosc });
       if (!r.blad && r.wynik) {
         const w = r.wynik;
         if (w.pola === 0) return 'żaden produkt nie ma tego parametru';
-        if (w.brakOpcji === w.pola) return 'brak opcji ' + k.wartosc;
+        if (w.brakOpcji === w.pola) return 'brak opcji ' + opisWartosci(k.wartosc);
         if (w.zle) return 'nie ustawiło w ' + w.zle + ' z ' + w.pola + ' produktów';
-        status(k.nazwa + ' = ' + k.wartosc + ' ✔ (' + w.pola + ' produktów)');
+        status(k.nazwa + ' = ' + opisWartosci(k.wartosc) + ' ✔ (' + w.pola + ' produktów)');
         return 'ok';
       }
       console.log('[AutoMap] dane Base – błąd, przechodzę na klikanie:', r.blad);
@@ -2268,6 +2301,8 @@
       status(k.nazwa + ': ' + wynik.powod + ' – próbuję w innym produkcie');
     }
     if (!wynik || !wynik.ok) return wynik ? wynik.powod : 'brak listy';
+    // przy kilku nazwach ("A|B") dalej pracujemy już na tej, którą faktycznie wybrało
+    if (wynik.tekst && String(k.wartosc).indexOf('|') > -1) k = Object.assign({}, k, { wartosc: wynik.tekst });
     const sel = wynik.sel;
     if (!await kopiujDoWszystkich(pole)) return 'brak "Kopiuj do wszystkich"';
 
@@ -2578,21 +2613,39 @@
 
   // duży alarm na ekranie + pikanie do skutku
   let alarmPik = null;
-  function zatrzymajCykl(tytul, tekst) {
+  // przyciski = [{ tekst, kolor, tytul, akcja }] – dodatkowe guziki na alarmie (np. „dopisz do listy”, „olej to”)
+  function zatrzymajCykl(tytul, tekst, przyciski) {
     lsDel(L_FULL); lsDel(L_CYKL); lsDel(L_ETAP); lsSet(L_AUTO, '0');
     try { status('STOP: ' + tytul); } catch {}
-    pokazAlarm(tytul, tekst);
+    pokazAlarm(tytul, tekst, przyciski);
     powiadom('🛑 ' + tytul, tekst + '\n' + PROCES.nazwa, { priorytet: 5, tagi: ['rotating_light'] });
     try { odswiezPrzyciski(); } catch {}
   }
-  function pokazAlarm(tytul, tekst) {
+  function pokazAlarm(tytul, tekst, przyciski) {
     schowajAlarm();
     const o = document.createElement('div');
     o.id = 'am-alarm';
     o.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#b71c1c;color:#fff;font-family:sans-serif;padding:18px 20px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.6)';
-    o.innerHTML = '<div style="font-size:26px;font-weight:bold">⚠️ ' + tytul + '</div><div style="font-size:15px;margin-top:6px">' + tekst + '</div><button id="am-alarm-ok" style="margin-top:10px;background:#fff;color:#b71c1c;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer">Wyłącz dźwięk</button>';
+    o.innerHTML = '<div style="font-size:26px;font-weight:bold">⚠️ ' + tytul + '</div><div style="font-size:15px;margin-top:6px">' + tekst + '</div>'
+      + '<div id="am-alarm-przyciski" style="margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'
+      + '<button id="am-alarm-ok" style="background:#fff;color:#b71c1c;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer">Wyłącz dźwięk</button></div>';
     document.body.appendChild(o);
     o.querySelector('#am-alarm-ok').onclick = () => { clearInterval(alarmPik); alarmPik = null; o.querySelector('#am-alarm-ok').remove(); };
+    // dodatkowe przyciski (bot stoi, dopiero klik decyduje co dalej)
+    const box = o.querySelector('#am-alarm-przyciski');
+    (przyciski || []).forEach(p => {
+      const b = document.createElement('button');
+      b.textContent = p.tekst;
+      if (p.tytul) b.title = p.tytul;
+      b.style.cssText = 'background:' + (p.kolor || '#37474f') + ';color:#fff;border:0;border-radius:8px;padding:8px 16px;font:bold 14px sans-serif;cursor:pointer';
+      b.onclick = async () => {
+        clearInterval(alarmPik); alarmPik = null;
+        box.querySelectorAll('button').forEach(x => { x.disabled = true; x.style.opacity = '.6'; });
+        b.textContent = p.tekst + ' …';
+        try { await p.akcja(); } catch (e) { console.log('[AutoMap] alarm – przycisk:', e); status('nie udało się: ' + (e && e.message || e)); }
+      };
+      box.appendChild(b);
+    });
     { const x = document.createElement('button'); x.textContent = '✕'; x.title = 'Schowaj alarm (bot dalej stoi)'; x.style.cssText = 'position:absolute;top:8px;right:12px;background:transparent;color:#fff;border:0;font:bold 22px sans-serif;cursor:pointer'; x.onclick = () => schowajAlarm(); o.appendChild(x); }
     pikaj(4);
     alarmPik = setInterval(() => pikaj(4), 15000);
@@ -3871,15 +3924,39 @@
         const pop = new Set(ost.ids.map(String));
         const wspolne = wybrane.filter(id => pop.has(String(id))).length;
         powtorzone = wspolne;
-        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length && bezOferty && !wezPaczke.__poprawka) {
+        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length && bezOferty && !wezPaczke.__poprawka && !wezPaczke.__olej) {
           // tryb „bez oferty”: poprzednia paczka była już wystawiana → jej produkty na listę tego katalogu i bierzemy dalej
           dodajDoSpisuBezOferty(katId, ost.ids);
           status('pomijam ' + wspolne + ' produktów z poprzedniej paczki – biorę nowe…');
           wezPaczke.__poprawka = true;
           try { return await wezPaczke(); } finally { wezPaczke.__poprawka = false; }
         }
-        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length) {
-          zatrzymajCykl('PĘTLA – TA SAMA PACZKA', katNazwa + ': ' + wspolne + ' z ' + wybrane.length + ' produktów było już w poprzedniej paczce. Zatrzymałem, żeby nie mielić w kółko (i nie robić duplikatów).');
+        if (!ost.nieWyszla && wspolne >= 0.5 * wybrane.length && !wezPaczke.__olej) {
+          // bot staje, ale można go z alarmu pchnąć dalej: dopisać powtórki do listy albo olać sprawdzanie
+          const stan = { full: lsGet(L_FULL), cykl: lsGet(L_CYKL), etap: lsGet(L_ETAP), auto: lsGet(L_AUTO) };
+          const wroc = () => {                                   // przywróć tryb sprzed STOP-u
+            schowajAlarm();
+            if (stan.full != null) lsSet(L_FULL, stan.full);
+            if (stan.cykl != null) lsSet(L_CYKL, stan.cykl);
+            if (stan.etap != null) lsSet(L_ETAP, stan.etap);
+            lsSet(L_AUTO, stan.auto == null ? '0' : stan.auto);
+            try { odswiezPrzyciski(); } catch {}
+          };
+          const dalej = async () => { wezPaczke.__olej = true; try { await wezPaczke(); } finally { wezPaczke.__olej = false; } };
+          zatrzymajCykl('PĘTLA – TA SAMA PACZKA', katNazwa + ': ' + wspolne + ' z ' + wybrane.length + ' produktów było już w poprzedniej paczce. Zatrzymałem, żeby nie mielić w kółko (i nie robić duplikatów).', [
+            { tekst: '➕ Dopisz do listy i bierz nowe', kolor: '#2e7d32',
+              tytul: 'Wpisuje produkty z poprzedniej paczki do spisu – nie wrócą w kolejnych paczkach – i bierze nową paczkę',
+              akcja: async () => {
+                wroc();
+                dodajDoSpisu(ost.ids);
+                if (bezOferty) dodajDoSpisuBezOferty(katId, ost.ids);
+                status('dopisałem ' + ost.ids.length + ' produktów do spisu – biorę nową paczkę…');
+                await dalej();
+              } },
+            { tekst: '🙈 Olej to – wystaw tę paczkę', kolor: '#ef6c00',
+              tytul: 'Nic nie dopisuje – wystawia tę samą paczkę mimo powtórek (uwaga na duplikaty)',
+              akcja: async () => { wroc(); status('lecę mimo powtórzonej paczki…'); await dalej(); } }
+          ]);
           return;
         }
       }
