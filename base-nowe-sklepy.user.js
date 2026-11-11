@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.29
+// @version      1.30
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -11,6 +11,9 @@
 // Panel „📂 Nowe sklepy” (prawy dolny róg Base):
 //  1) wybierasz hurtownię, wpisujesz konta Allegro → skrypt proponuje nr PRZE, zdjęcie i mnożnik (zasady: bez zdj. 1,
 //     mnożnik ≥ 0,06 od zajętych, to samo zdjęcie tylko przy mnożniku różnym o ≥ 0,3), czas wysyłki z hurtowni (zmienisz)
+//     ZDJĘCIE: zamiast numeru można dać ODW = „Kolejność zdjęć odwrotna niż w magazynie”. Galeria zostaje „Wstaw tylko pierwsze
+//     zdjęcie”, więc do oferty idzie OSTATNIE zdjęcie z magazynu – to kolejny wolny wariant obok zdjęć nr 2,3,4…
+//     W tabeli wybierasz z listy, w tekście wpisujesz np. „Sklep 1.45 odw” albo „Sklep ×1.45/odw”.
 //  2) Start → sam po kolei: dodaje „Wysyłam z Allegro” (HURTOWNIA AUTOMATIC PRZE-nr Sklep) i ją wypełnia,
 //     integracja Allegro (zdjęcie, mnożnik, czas wysyłki…), katalog, import z hurtowni (jeden po drugim), waga z mnożnikiem.
 //  Warunki zwrotów / gwarancje / producenta / cennik dostaw – NIE rusza.
@@ -98,11 +101,21 @@
   // okienka potwierdzeń Base – zawsze OK, żeby skrypt nie stawał
   function bezOkienek() { try { W.confirm = () => true; W.alert = m => log('okno: ' + m); } catch {} }
 
+  // ---------- zdjęcie sklepu: numer albo ODW (kolejność odwrotna = ostatnie zdjęcie) ----------
+  const ODW = 'ODW';
+  const jestOdw = v => /^(odw|odwr|odwrotna|odwrotne|odwrotnie|ostatnie|ostatnia)$/i.test(String(v == null ? '' : v).trim());
+  const zN = v => (jestOdw(v) ? ODW : (v === '' || v == null ? '' : +v));          // znormalizowane zdjęcie: liczba albo 'ODW'
+  const zOk = v => (zN(v) === ODW || +v > 0);
+  const zTxt = v => (zN(v) === ODW ? ODW : String(v == null ? '' : v));
+  const zOpis = v => (zN(v) === ODW ? 'kolejność odwrotna (ostatnie zdjęcie)' : 'zdjęcie nr ' + v);
+  const SORT_ODW = 'Kolejność zdjęć odwrotna niż w magazynie';
+  const sortZdjec = v => (zN(v) === ODW ? SORT_ODW : 'Na początku zdjęcie nr ' + v);
+
   // ---------- propozycja zdjęć i mnożników ----------
   function zajete(klucz, pomin = []) {
     const h = hurtownie()[klucz] || {};
-    const z = (h.uzyte || []).map(u => ({ sklep: u.sklep, m: +u.mnoznik, z: +u.zdjecie }));
-    for (const x of historia()) if (nn(x.hurtownia) === nn(klucz) && x.mnoznik && x.zdjecie && !pomin.includes(nn(x.sklep))) z.push({ sklep: x.sklep, m: +x.mnoznik, z: +x.zdjecie });
+    const z = (h.uzyte || []).map(u => ({ sklep: u.sklep, m: +u.mnoznik, z: zN(u.zdjecie) }));
+    for (const x of historia()) if (nn(x.hurtownia) === nn(klucz) && x.mnoznik && zOk(x.zdjecie) && !pomin.includes(nn(x.sklep))) z.push({ sklep: x.sklep, m: +x.mnoznik, z: zN(x.zdjecie) });
     return z;
   }
   // linie: "Sklep [PRZE-nr|nr] [mnożnik] [zdjęcie]" – np. "ProfiPrzemysl 1 1.45 3", "Sklep 1.45 3", "Sklep ×1.45/3", "Sklep" (samo konto)
@@ -115,9 +128,10 @@
       for (const t of tok) {
         let m;
         if ((m = t.match(/^PRZE-?(\d+)$/i))) r.nr = +m[1];
-        else if ((m = t.match(/^[x×*]?(\d+(?:[.,]\d+)?)\/(\d+)$/i))) { r.mnoznik = +m[1].replace(',', '.'); r.zdjecie = +m[2]; }
+        else if ((m = t.match(/^[x×*]?(\d+(?:[.,]\d+)?)\/(\d+|odw\w*|ostatni\w*)$/i))) { r.mnoznik = +m[1].replace(',', '.'); r.zdjecie = zN(m[2]); }
         else if ((m = t.match(/^[x×*](\d+(?:[.,]\d+)?)$/i)) || (m = t.match(/^(\d+[.,]\d+)$/))) r.mnoznik = +m[1].replace(',', '.');
-        else if ((m = t.match(/^(?:zdj\.?|z)(\d+)$/i))) r.zdjecie = +m[1];
+        else if ((m = t.match(/^(?:zdj\.?|z)\s*(\d+|odw\w*|ostatni\w*)$/i))) r.zdjecie = zN(m[1]);
+        else if (jestOdw(t)) r.zdjecie = ODW;
         else if (/^\d+$/.test(t)) ints.push(+t);
         else nazwy.push(t);
       }
@@ -141,8 +155,8 @@
     const stale = {};
     for (const s of sklepy) {
       const w = wpisane[nn(s)] || {}, jest = hist.find(x => nn(x.sklep) === nn(s) && nn(x.hurtownia) === nn(klucz));
-      if (w.mnoznik != null && w.zdjecie != null) stale[nn(s)] = { m: +w.mnoznik, z: +w.zdjecie, wpisane: true };
-      else if (w.mnoznik == null && w.zdjecie == null && jest && jest.mnoznik && jest.zdjecie) stale[nn(s)] = { m: +jest.mnoznik, z: +jest.zdjecie, zHistorii: true, czas: jest.czas };
+      if (w.mnoznik != null && w.zdjecie != null) stale[nn(s)] = { m: +w.mnoznik, z: zN(w.zdjecie), wpisane: true };
+      else if (w.mnoznik == null && w.zdjecie == null && jest && jest.mnoznik && zOk(jest.zdjecie)) stale[nn(s)] = { m: +jest.mnoznik, z: zN(jest.zdjecie), zHistorii: true, czas: jest.czas };
     }
     for (const k in stale) uzyte.push({ m: stale[k].m, z: stale[k].z });
     return sklepy.map(s => {
@@ -154,7 +168,8 @@
       for (let m = mOd; m <= mDo; m++) {
         const mm = m / 100, odl = uzyte.length ? Math.min(...uzyte.map(u => Math.abs(u.m - mm))) : 9;
         if (w.mnoznik == null && odl < 0.06 - 1e-9) continue;
-        for (let z = w.zdjecie != null ? +w.zdjecie : 2; z <= (w.zdjecie != null ? +w.zdjecie : maxZ); z++) {
+        const kandydaci = w.zdjecie != null ? [zN(w.zdjecie)] : [...Array(Math.max(0, maxZ - 1))].map((_, i) => i + 2).concat([ODW]);
+        for (const z of kandydaci) {
           if (w.zdjecie == null && w.mnoznik == null && uzyte.some(u => u.z === z && Math.abs(u.m - mm) < 0.3 - 1e-9)) continue;
           const kol = uzyte.some(u => u.z === z && Math.abs(u.m - mm) < 0.3 - 1e-9) ? 5 : 0;
           const ocena = Math.min(odl, 0.2) * 10 - uzyte.filter(u => u.z === z).length - Math.abs(mm - (minM + maxM) / 2) * 0.5 - kol;
@@ -169,13 +184,13 @@
   function sprawdzZasady(klucz, w) {
     const b = [];
     const inne = zajete(klucz, w.map(x => nn(x.sklep)));
-    const wszystkie = [...inne.map(u => ({ sklep: u.sklep, m: u.m, z: u.z, stare: true })), ...w.map(x => ({ sklep: x.sklep, m: +x.mnoznik, z: +x.zdjecie }))];
-    for (const x of w) { if (+x.zdjecie === 1) b.push(x.sklep + ': zdjęcie nr 1'); if (!(+x.mnoznik > 0) || !(+x.zdjecie > 0)) b.push(x.sklep + ': brak zdjęcia/mnożnika'); }
+    const wszystkie = [...inne.map(u => ({ sklep: u.sklep, m: u.m, z: u.z, stare: true })), ...w.map(x => ({ sklep: x.sklep, m: +x.mnoznik, z: zN(x.zdjecie) }))];
+    for (const x of w) { if (+x.zdjecie === 1) b.push(x.sklep + ': zdjęcie nr 1'); if (!(+x.mnoznik > 0) || !zOk(x.zdjecie)) b.push(x.sklep + ': brak zdjęcia/mnożnika'); }
     for (let i = 0; i < wszystkie.length; i++) for (let j = i + 1; j < wszystkie.length; j++) {
       const a = wszystkie[i], c = wszystkie[j]; if (a.stare && c.stare) continue;
       const d = Math.abs(a.m - c.m);
       if (d < 0.06 - 1e-9) b.push(a.sklep + ' i ' + c.sklep + ': mnożniki za blisko (' + a.m + ' / ' + c.m + ')');
-      if (a.z === c.z && d < 0.3 - 1e-9) b.push(a.sklep + ' i ' + c.sklep + ': to samo zdjęcie ' + a.z + ' przy podobnym mnożniku');
+      if (a.z === c.z && d < 0.3 - 1e-9) b.push(a.sklep + ' i ' + c.sklep + ': to samo zdjęcie ' + zTxt(a.z) + ' przy podobnym mnożniku');
     }
     return b;
   }
@@ -287,6 +302,13 @@
   const przycisk = k => `background:${k};color:#fff;border:0;border-radius:6px;padding:7px 12px;font:bold 13px sans-serif;cursor:pointer`;
   const CZASY = [['24h', '24 godziny'], ['48h', '48 godzin'], ['3d', '3 dni'], ['4d', '4 dni'], ['5d', '5 dni'], ['7d', '7 dni']];
   const selCzas = (v, attr = '') => { const o = CZASY.some(c => c[0] === v) ? CZASY : [...CZASY, [v, v]]; return `<select ${attr} style="${pole}">${o.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`; };
+  const selZdjecie = (v, maxZ, attr = '') => {
+    const z = zN(v), lista = [];
+    for (let i = 2; i <= (+maxZ || 6); i++) lista.push([String(i), 'zdjęcie nr ' + i]);
+    lista.push([ODW, 'odwrotna – ostatnie zdj.']);
+    if (z !== '' && !lista.some(x => x[0] === String(z))) lista.unshift([String(z), 'zdjęcie nr ' + z]);
+    return `<select ${attr} style="${pole};width:150px">${lista.map(([k, t]) => `<option value="${k}" ${k === String(z) ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+  };
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   // ---------- podsumowanie / powtórka ----------
@@ -326,7 +348,7 @@
     const o = nakladka(`<div style="font-size:17px;font-weight:bold;margin-bottom:6px">📋 Podsumowanie – ${esc(z.hurtownia)}${z.zatrzymane ? ' <span style="color:#ffb74d">(zatrzymane ręcznie)</span>' : ''}${z.powtorka ? ' <span style="opacity:.6">(powtórka)</span>' : ''}</div>
       <div style="margin-bottom:10px;opacity:.85">${z.koniec ? new Date(z.koniec).toLocaleString('pl-PL') : ''}${czas ? ' · trwało ' + czas : ''} · sklepów: ${z.sklepy.length} · kroków OK: <b style="color:#7ee2a8">${r.ok}</b>/${r.wszystkie}${r.zle ? ' · nie przeszło: <b style="color:#ff8a87">' + r.zle + '</b>' : ' · <b style="color:#7ee2a8">wszystko ✔</b>'}</div>
       <table style="width:100%;border-collapse:collapse"><tr style="opacity:.7;text-align:left"><th><input type="checkbox" id="p-wsz"></th><th>Sklep</th><th>Nazwa</th><th>×/zdj.</th>${K.map(k => '<th style="font-size:11px;text-align:center;max-width:90px">' + esc(OPIS[k]) + '</th>').join('')}</tr>
-        ${z.sklepy.map(s => { const zly = K.some(k => stanKroku(s, k) !== 'ok'); return `<tr style="border-top:1px solid #2c3e50${zly ? ';background:rgba(255,82,82,.08)' : ''}"><td><input type="checkbox" class="p-s" value="${esc(s.sklep)}" ${zly ? 'checked' : ''}></td><td><b>${esc(s.sklep)}</b></td><td style="opacity:.75;font-size:12px">${esc(nazwaWza(z.hurtownia, s))}</td><td style="opacity:.75">${s.mnoznik}/${s.zdjecie}</td>${K.map(k => '<td style="text-align:center">' + ikona(s, k) + '</td>').join('')}</tr>`; }).join('')}</table>
+        ${z.sklepy.map(s => { const zly = K.some(k => stanKroku(s, k) !== 'ok'); return `<tr style="border-top:1px solid #2c3e50${zly ? ';background:rgba(255,82,82,.08)' : ''}"><td><input type="checkbox" class="p-s" value="${esc(s.sklep)}" ${zly ? 'checked' : ''}></td><td><b>${esc(s.sklep)}</b></td><td style="opacity:.75;font-size:12px">${esc(nazwaWza(z.hurtownia, s))}</td><td style="opacity:.75">${s.mnoznik}/${zTxt(s.zdjecie)}</td>${K.map(k => '<td style="text-align:center">' + ikona(s, k) + '</td>').join('')}</tr>`; }).join('')}</table>
       ${bledy.length ? '<div style="margin-top:12px"><b style="color:#ff8a87">Co nie przeszło:</b><div style="margin-top:4px;max-height:200px;overflow:auto;background:#0f1720;border-radius:6px;padding:8px;font:12px/1.5 ui-monospace,Menlo,monospace">' + bledy.map(b => '<div><b>' + esc(b.sklep) + '</b> – ' + esc(b.krok) + ': <span style="color:#ffab91">' + esc(b.powod) + '</span></div>').join('') + '</div></div>' : ''}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
         <button id="p-log" style="${przycisk('#37474f')}">📜 Log</button>
@@ -340,7 +362,7 @@
     o.querySelector('#p-zamknij').onclick = () => o.remove();
     o.querySelector('#p-log').onclick = () => { o.remove(); logOtwarty = true; rysujPanel(); };
     o.querySelector('#p-kopiuj').onclick = () => {
-      const t = 'Nowe sklepy – ' + z.hurtownia + ' – ' + r.ok + '/' + r.wszystkie + ' OK\n' + z.sklepy.map(s => s.sklep + ' (×' + s.mnoznik + '/' + s.zdjecie + '): ' + K.map(k => (stanKroku(s, k) === 'ok' ? '✔ ' : '✖ ') + OPIS[k]).join(', ')).join('\n') + (bledy.length ? '\n\nNie przeszło:\n' + bledy.map(b => b.sklep + ' – ' + b.krok + ': ' + b.powod).join('\n') : '');
+      const t = 'Nowe sklepy – ' + z.hurtownia + ' – ' + r.ok + '/' + r.wszystkie + ' OK\n' + z.sklepy.map(s => s.sklep + ' (×' + s.mnoznik + '/' + zTxt(s.zdjecie) + '): ' + K.map(k => (stanKroku(s, k) === 'ok' ? '✔ ' : '✖ ') + OPIS[k]).join(', ')).join('\n') + (bledy.length ? '\n\nNie przeszło:\n' + bledy.map(b => b.sklep + ' – ' + b.krok + ': ' + b.powod).join('\n') : '');
       (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => alert('Skopiowane'), () => prompt('Skopiuj:', t));
     };
     const nb = o.querySelector('#p-nieudane'); if (nb) nb.onclick = () => { const z1 = zazn(); if (!z1.length) return alert('Zaznacz sklepy'); powtorz(z, 'nieudane', z1); };
@@ -360,8 +382,8 @@
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><button id="n-ist-usun" style="${przycisk('#b71c1c')};padding:3px 8px;font-size:12px">🗑 Usuń zaznaczone</button>
             <button id="n-ist-przen" style="${przycisk('#455a64')};padding:3px 8px;font-size:12px">↪ Przenieś do…</button>
             <button id="n-ist-nazwa" style="${przycisk('#00695c')};padding:3px 8px;font-size:12px">✏️ Zmień nazwę</button></div>
-          <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><span style="font-size:11px;opacity:.7">można od razu dać swoje: Sklep mnożnik zdjęcie</span><br><textarea id="n-s" style="${pole};width:240px;height:90px" placeholder="NowySklep&#10;InnySklep 1.45 3"></textarea></div>
-          <div style="margin-top:8px">Wcześniej zrobione sklepy (do bazy)<br><span style="font-size:11px;opacity:.7">Sklep [nr] mnożnik zdjęcie – jedno w linii</span><br><textarea id="n-stare" style="${pole};width:240px;height:70px" placeholder="ProfiPrzemysl 1 1.45 3&#10;StarySklep 1.80 4"></textarea>
+          <div style="margin-top:8px">Nowe konta Allegro (jedno w linii)<br><span style="font-size:11px;opacity:.7">można od razu dać swoje: Sklep mnożnik zdjęcie (zdjęcie: nr albo <b>odw</b>)</span><br><textarea id="n-s" style="${pole};width:240px;height:90px" placeholder="NowySklep&#10;InnySklep 1.45 3"></textarea></div>
+          <div style="margin-top:8px">Wcześniej zrobione sklepy (do bazy)<br><span style="font-size:11px;opacity:.7">Sklep [nr] mnożnik zdjęcie (nr albo odw) – jedno w linii</span><br><textarea id="n-stare" style="${pole};width:240px;height:70px" placeholder="ProfiPrzemysl 1 1.45 3&#10;StarySklep 1.80 4"></textarea>
             <br><button id="n-stare-zap" style="${przycisk('#6a1b9a')};margin-top:4px">💾 Dopisz do bazy</button></div></div>
         <div style="flex:1;min-width:260px"><div id="n-info" style="opacity:.85"></div>
           <button id="n-prop" style="${przycisk('#1565c0')};margin-top:8px">① Zaproponuj nr, zdjęcia i mnożniki</button></div>
@@ -376,11 +398,11 @@
       o.querySelector('#n-czas-box').innerHTML = selCzas(h.czasWysylki || '24h', 'id="n-czas"');
       o.querySelector('#n-info').innerHTML = (br.length ? '<span style="color:#ff8a87">⚠ Brakuje danych hurtowni: ' + esc(br.join(', ')) + ' – uzupełnij w 🏭</span><br>' : '<span style="color:#7ee2a8">✔ dane hurtowni kompletne</span><br>') +
         'Magazyn: ' + esc(h.magazyn || '—') + ' · import: ' + esc(h.import) + ' (' + esc(h.zrodlo || h.magazyn || '—') + ')<br>' +
-        'Max zdjęć: ' + (h.maxZdjecie || 6) + ' · max mnożnik: ' + (h.maxMnoznik || MAX_MNOZNIK) + '<br>Zajęte: ' + (z.map(u => esc(u.sklep) + ' ×' + u.m.toFixed(2) + '/' + u.z).join(', ') || 'brak');
+        'Max zdjęć: ' + (h.maxZdjecie || 6) + ' (+ ODW = kolejność odwrotna) · max mnożnik: ' + (h.maxMnoznik || MAX_MNOZNIK) + '<br>Zajęte: ' + (z.map(u => esc(u.sklep) + ' ×' + u.m.toFixed(2) + '/' + zTxt(u.z)).join(', ') || 'brak');
     };
     const istniejace = () => {
       const lista = historia().filter(x => nn(x.hurtownia) === nn(hSel.value)).sort((a, b) => (+a.nr || 0) - (+b.nr || 0));
-      o.querySelector('#n-ist').innerHTML = lista.length ? lista.map(x => `<label style="display:block"><input type="checkbox" class="n-ist" value="${esc(x.sklep)}"> ${+x.nr ? 'PRZE-' + x.nr : '(bez nr)'} ${esc(x.sklep)}${x.mnoznik ? ' <span style="opacity:.6">×' + (+x.mnoznik).toFixed(2) + '/' + x.zdjecie + '</span>' : ''}</label>`).join('') : '<span style="opacity:.6">brak</span>';
+      o.querySelector('#n-ist').innerHTML = lista.length ? lista.map(x => `<label style="display:block"><input type="checkbox" class="n-ist" value="${esc(x.sklep)}"> ${+x.nr ? 'PRZE-' + x.nr : '(bez nr)'} ${esc(x.sklep)}${x.mnoznik ? ' <span style="opacity:.6">×' + (+x.mnoznik).toFixed(2) + '/' + zTxt(x.zdjecie) + '</span>' : ''}</label>`).join('') : '<span style="opacity:.6">brak</span>';
     };
     hSel.onchange = () => { info(); istniejace(); }; info(); istniejace();
     o.querySelector('#n-wsz').onclick = e => { e.preventDefault(); o.querySelectorAll('.n-krok').forEach(c => c.checked = !FINALNE.includes(c.value)); };
@@ -391,10 +413,10 @@
         ${wiersze.map((w, i) => `<tr><td><input data-i="${i}" data-p="sklep" value="${esc(w.sklep)}" title="kliknij, żeby poprawić nazwę" style="${pole};width:150px;font-weight:bold">${w.zHistorii ? ' <span style="opacity:.6">(z historii)</span>' : w.wpisane ? ' <span style="color:#ce93d8">(wpisane)</span>' : ''}</td>
           <td><input data-i="${i}" data-p="nr" value="${w.nr}" style="${pole};width:55px"></td>
           <td><input data-i="${i}" data-p="nazwa" value="${esc(nazwaWza(hSel.value, w))}" title="pełna nazwa integracji i katalogu – możesz zmienić" style="${pole};width:100%;min-width:260px${w.nazwa ? ';border-color:#ce93d8' : ''}"></td>
-          <td><input data-i="${i}" data-p="zdjecie" value="${w.zdjecie}" style="${pole};width:55px"></td>
+          <td>${selZdjecie(w.zdjecie, (H[hSel.value] || {}).maxZdjecie, 'data-i="' + i + '" data-p="zdjecie"')}</td>
           <td><input data-i="${i}" data-p="mnoznik" value="${w.mnoznik}" style="${pole};width:70px"></td>
           <td>${selCzas(w.czas, 'data-i="' + i + '" data-p="czas"')}</td></tr>`).join('')}</table><div id="n-bledy" style="color:#ff8a87;margin-top:6px"></div>`;
-      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; const p = e.dataset.p; if (p === 'nazwa') { const v = e.value.trim(); if (!v || v === nazwaDomyslna(hSel.value, w)) delete w.nazwa; else w.nazwa = v; return rysuj(); } if (p === 'sklep') { const v = e.value.trim(); if (!v) return rysuj(); const hist = historia(); let zm = false; hist.forEach(x => { if (nn(x.hurtownia) === nn(hSel.value) && nn(x.sklep) === nn(w.sklep)) { x.sklep = v; zm = true; } }); if (zm) { pisz(L_HIST, hist); istniejace(); info(); } w.sklep = v; return rysuj(); } w[p] = p === 'mnoznik' ? e.value.replace(',', '.') : p === 'czas' ? e.value : +e.value; rysuj(); });
+      o.querySelectorAll('#n-tab [data-i]').forEach(e => e.onchange = () => { const w = wiersze[+e.dataset.i]; const p = e.dataset.p; if (p === 'nazwa') { const v = e.value.trim(); if (!v || v === nazwaDomyslna(hSel.value, w)) delete w.nazwa; else w.nazwa = v; return rysuj(); } if (p === 'sklep') { const v = e.value.trim(); if (!v) return rysuj(); const hist = historia(); let zm = false; hist.forEach(x => { if (nn(x.hurtownia) === nn(hSel.value) && nn(x.sklep) === nn(w.sklep)) { x.sklep = v; zm = true; } }); if (zm) { pisz(L_HIST, hist); istniejace(); info(); } w.sklep = v; return rysuj(); } w[p] = p === 'mnoznik' ? e.value.replace(',', '.') : p === 'czas' ? e.value : p === 'zdjecie' ? zN(e.value) : +e.value; rysuj(); });
       const b = sprawdzZasady(hSel.value, wiersze);
       o.querySelector('#n-bledy').innerHTML = b.map(esc).join('<br>');
       o.querySelector('#n-start').style.display = wiersze.length ? '' : 'none';
@@ -456,26 +478,26 @@
     o.querySelector('#n-stare-zap').onclick = () => {
       const k = hSel.value, lista = parsujSklepy(o.querySelector('#n-stare').value);
       if (!lista.length) return alert('Wpisz sklepy: Sklep [nr] mnożnik zdjęcie');
-      const zle = lista.filter(x => !(x.mnoznik > 0) || !(x.zdjecie > 0));
-      if (zle.length) return alert('Brak mnożnika albo zdjęcia przy: ' + zle.map(x => x.sklep).join(', ') + '\nFormat: Sklep [nr] mnożnik zdjęcie, np. ProfiPrzemysl 1 1.45 3');
-      if (!confirm('Dopisać do bazy (' + k + '):\n' + lista.map(x => (x.nr ? 'PRZE-' + x.nr + ' ' : '') + x.sklep + '  ×' + x.mnoznik.toFixed(2) + '  zdj.' + x.zdjecie).join('\n'))) return;
+      const zle = lista.filter(x => !(x.mnoznik > 0) || !zOk(x.zdjecie));
+      if (zle.length) return alert('Brak mnożnika albo zdjęcia przy: ' + zle.map(x => x.sklep).join(', ') + '\nFormat: Sklep [nr] mnożnik zdjęcie, np. ProfiPrzemysl 1 1.45 3 (zdjęcie może być ODW)');
+      if (!confirm('Dopisać do bazy (' + k + '):\n' + lista.map(x => (x.nr ? 'PRZE-' + x.nr + ' ' : '') + x.sklep + '  ×' + x.mnoznik.toFixed(2) + '  zdj.' + zTxt(x.zdjecie)).join('\n'))) return;
       const hist = historia();
       for (const x of lista) {
         const i = hist.findIndex(y => nn(y.sklep) === nn(x.sklep));
-        const e = { sklep: x.sklep, hurtownia: k, mnoznik: x.mnoznik, zdjecie: x.zdjecie, ...(x.nr ? { nr: x.nr } : {}) };
+        const e = { sklep: x.sklep, hurtownia: k, mnoznik: x.mnoznik, zdjecie: zN(x.zdjecie), ...(x.nr ? { nr: x.nr } : {}) };
         if (i >= 0) hist[i] = { ...hist[i], ...e }; else hist.push({ nr: null, ...e });
       }
       pisz(L_HIST, hist);
       o.querySelector('#n-stare').value = '';
       info(); istniejace();
-      if (wiersze.length) { wiersze = zaproponuj(k, wiersze.map(w => w.sklep), Object.fromEntries(wiersze.filter(w => w.wpisane).map(w => [nn(w.sklep), { nr: w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie }]))); rysuj(); }
+      if (wiersze.length) { wiersze = zaproponuj(k, wiersze.map(w => w.sklep), Object.fromEntries(wiersze.filter(w => w.wpisane).map(w => [nn(w.sklep), { nr: w.nr, mnoznik: +w.mnoznik, zdjecie: zOk(w.zdjecie) ? zN(w.zdjecie) : null }]))); rysuj(); }
     };
     // zapis tabeli do bazy (rezerwacja zdjęć / mnożników, nr, własna nazwa) – bez startu bota
     const zapiszWiersze = k => {
       const hist = historia();
       for (const w of wiersze) {
         const i = hist.findIndex(x => nn(x.sklep) === nn(w.sklep) && nn(x.hurtownia) === nn(k));
-        const e = { sklep: w.sklep, hurtownia: k, nr: +w.nr, mnoznik: +w.mnoznik, zdjecie: +w.zdjecie, czas: w.czas, nazwa: w.nazwa || undefined };
+        const e = { sklep: w.sklep, hurtownia: k, nr: +w.nr, mnoznik: +w.mnoznik, zdjecie: zN(w.zdjecie), czas: w.czas, nazwa: w.nazwa || undefined };
         if (i >= 0) { hist[i] = { ...hist[i], ...e }; if (!w.nazwa) delete hist[i].nazwa; } else hist.push(e);
       }
       pisz(L_HIST, hist);
@@ -500,11 +522,11 @@
       const tylkoZnajdzKatalog = !wyb.includes('katalog') && ['waga', 'import', 'finalEan'].some(x => wyb.includes(x));
       if (tylkoZnajdzKatalog) kroki.push('katalog');
       if (b.length && wyb.some(x => x === 'allegro' || x === 'waga') && !confirm('Uwagi do zasad:\n' + b.join('\n') + '\n\nMimo to startować?')) return;
-      if (!confirm('Start ' + wiersze.length + ' sklepów (' + k + '):\nKroki: ' + wyb.map(x => x === 'warunki' ? 'warunki (' + war.map(w => WARUNKI.find(y => y[0] === w)[1]).join(', ') + ')' : (WYBOR.find(y => y[0] === x) || [, x])[1]).join(', ') + '\n\n' + wiersze.map(w => nazwaWza(k, w) + '  ×' + w.mnoznik + '  zdj.' + w.zdjecie + '  ' + w.czas).join('\n'))) return;
+      if (!confirm('Start ' + wiersze.length + ' sklepów (' + k + '):\nKroki: ' + wyb.map(x => x === 'warunki' ? 'warunki (' + war.map(w => WARUNKI.find(y => y[0] === w)[1]).join(', ') + ')' : (WYBOR.find(y => y[0] === x) || [, x])[1]).join(', ') + '\n\n' + wiersze.map(w => nazwaWza(k, w) + '  ×' + w.mnoznik + '  zdj.' + zTxt(w.zdjecie) + '  ' + w.czas).join('\n'))) return;
       zapiszWiersze(k);
       pisz(L_LOG, []);
       zapiszZad({ hurtownia: k, kroki, warunki: war, tylkoZnajdzKatalog, start: Date.now(),
-        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, ...(w.nazwa ? { nazwa: w.nazwa } : {}), mnoznik: (+w.mnoznik).toFixed(2), zdjecie: +w.zdjecie, czas: w.czas, ok: {}, proby: {}, odswC: !war.includes('cennik'), odswP: !war.includes('producent') })) });
+        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, ...(w.nazwa ? { nazwa: w.nazwa } : {}), mnoznik: (+w.mnoznik).toFixed(2), zdjecie: zN(w.zdjecie), czas: w.czas, ok: {}, proby: {}, odswC: !war.includes('cennik'), odswP: !war.includes('producent') })) });
       log('START ' + k + ': ' + wiersze.map(w => w.sklep).join(', '));
       powiadom('Start nowych sklepów', k + ': ' + wiersze.map(w => w.sklep).join(', '));
       o.remove(); rysujPanel(); setTimeout(silnik, 500);
@@ -522,7 +544,7 @@
     const rys = () => {
       o.querySelector('#h-tab').innerHTML = '<tr style="opacity:.7;text-align:left"><th>Hurtownia</th>' + P.map(p => '<th>' + p[2] + '</th>').join('') + '<th>Paczkomat</th><th>Braki</th></tr>' +
         Object.entries(H).map(([k, v]) => '<tr><td><b>' + esc(k) + '</b></td>' + P.map(([g, p, , w]) => {
-          const val = p === 'uzyteTxt' ? (v.uzyte || []).map(u => (u.sklep ? u.sklep + ':' : '') + u.mnoznik + '/' + u.zdjecie).join(', ') : g ? (v[g] || {})[p] : v[p];
+          const val = p === 'uzyteTxt' ? (v.uzyte || []).map(u => (u.sklep ? u.sklep + ':' : '') + u.mnoznik + '/' + zTxt(u.zdjecie)).join(', ') : g ? (v[g] || {})[p] : v[p];
           if (p === 'czasWysylki') return '<td>' + selCzas(v.czasWysylki || '24h', 'data-h="' + esc(k) + '" data-p="czasWysylki"') + '</td>';
           if (p === 'typImportu') return `<td><select data-h="${esc(k)}" data-p="typImportu" style="${pole}">${[['nowe', 'Tylko nowe'], ['nowe_i_aktualizuj', 'Nowe + aktualizuj'], ['powiaz_i_nowe', 'Powiąż + utwórz nowe']].map(([a, b]) => `<option value="${a}" ${(v.typImportu || 'nowe') === a ? 'selected' : ''}>${b}</option>`).join('')}</select></td>`;
           if (p === 'import') return `<td><select data-h="${esc(k)}" data-p="import" style="${pole}"><option ${v.import !== 'baseconnect' ? 'selected' : ''}>hurtownia</option><option ${v.import === 'baseconnect' ? 'selected' : ''}>baseconnect</option></select></td>`;
@@ -533,7 +555,7 @@
       const h = H[i.dataset.h], p = i.dataset.p;
       if (i.type === 'checkbox') h[p] = i.checked;
       else if (i.dataset.g) { h.kurier = h.kurier || {}; h.kurier[p] = p === 'telefon' ? telefon(i.value) : i.value.trim(); }
-      else if (p === 'uzyteTxt') h.uzyte = i.value.split(',').map(x => x.trim()).filter(Boolean).map(x => { const m = x.match(/^(?:(.+?):)?\s*([\d.,]+)\s*\/\s*(\d+)$/); return m ? { sklep: (m[1] || '').trim(), mnoznik: +m[2].replace(',', '.'), zdjecie: +m[3] } : null; }).filter(Boolean);
+      else if (p === 'uzyteTxt') h.uzyte = i.value.split(',').map(x => x.trim()).filter(Boolean).map(x => { const m = x.match(/^(?:(.+?):)?\s*([\d.,]+)\s*\/\s*(\d+|odw\w*|ostatni\w*)$/i); return m ? { sklep: (m[1] || '').trim(), mnoznik: +m[2].replace(',', '.'), zdjecie: zN(m[3]) } : null; }).filter(Boolean);
       else if (p === 'maxZdjecie' || p === 'maxMnoznik') { if (i.value.trim()) h[p] = +i.value.replace(',', '.'); else delete h[p]; }
       else h[p] = i.value.trim();
     });
@@ -719,7 +741,7 @@
         order_products_thumbs_source: 'Tak, miniaturki produktów pobierane z katalogu Base.com', order_vat_source: 'Zgodna ze stawką podaną przy produkcie w magazynie',
         forwarding_invoice: 'Tak, przekazuj automatycznie faktury od razu po utworzeniu', invoice_forwarding_options: 'Przekazuj fakturę zawsze' } },
       { nazwa: 'Wystawianie i oferty', tab: 'account_modal_options', kotwica: 'gallery_images_sort', wybory: {
-        gallery_images_sort: 'Na początku zdjęcie nr ' + s.zdjecie, gallery_images_use: 'Wstaw tylko pierwsze zdjęcie', title_auto_trim: 'Tak',
+        gallery_images_sort: sortZdjec(s.zdjecie), gallery_images_use: 'Wstaw tylko pierwsze zdjęcie', title_auto_trim: 'Tak',
         handling_time: czasTekst(s.czas || h.czasWysylki), invoice_options: 'Faktura VAT', country_code: 'Polska', voivodeship_code: 'wielkopolskie', link_theme: 'OFERTY NOWY EAN',
         ...(BEZPIECZENSTWO ? { safety_information_type: 'Dodaj tekst' } : {}) },
         pola: { city: 'POZNAŃ', postcode: '60-195', ...(MNOZNIK_CENY ? { price_mult: s.mnoznik } : {}), ...(BEZPIECZENSTWO ? { safety_information_extra_text: BEZPIECZENSTWO } : {}) } },
@@ -782,7 +804,7 @@
     }
     await zamknijModal();
     if (zle.length) return s.proby.allegro < 2 ? 'ponów' : 'po zapisie nie zgadza się: ' + zle.join('; ');
-    log('   zdjęcie nr ' + s.zdjecie + ', mnożnik ×' + s.mnoznik + ', czas ' + czasTekst(s.czas || h.czasWysylki));
+    log('   ' + zOpis(s.zdjecie) + ', mnożnik ×' + s.mnoznik + ', czas ' + czasTekst(s.czas || h.czasWysylki));
     return 'ok';
   };
 
