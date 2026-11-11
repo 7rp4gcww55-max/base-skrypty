@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.30
+// @version      1.31
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -103,6 +103,7 @@
 
   // ---------- zdjęcie sklepu: numer albo ODW (kolejność odwrotna = ostatnie zdjęcie) ----------
   const ODW = 'ODW';
+  const MAX_LISTA_ZDJEC = 16;                            // ile numerów zdjęć pokazać na liście w tabeli (propozycje bota dalej wg „Max zdjęć” hurtowni w 🏭)
   const jestOdw = v => /^(odw|odwr|odwrotna|odwrotne|odwrotnie|ostatnie|ostatnia)$/i.test(String(v == null ? '' : v).trim());
   const zN = v => (jestOdw(v) ? ODW : (v === '' || v == null ? '' : +v));          // znormalizowane zdjęcie: liczba albo 'ODW'
   const zOk = v => (zN(v) === ODW || +v > 0);
@@ -304,7 +305,7 @@
   const selCzas = (v, attr = '') => { const o = CZASY.some(c => c[0] === v) ? CZASY : [...CZASY, [v, v]]; return `<select ${attr} style="${pole}">${o.map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`; };
   const selZdjecie = (v, maxZ, attr = '') => {
     const z = zN(v), lista = [];
-    for (let i = 2; i <= (+maxZ || 6); i++) lista.push([String(i), 'zdjęcie nr ' + i]);
+    for (let i = 2; i <= Math.max(MAX_LISTA_ZDJEC, +maxZ || 6); i++) lista.push([String(i), 'zdjęcie nr ' + i]);
     lista.push([ODW, 'odwrotna – ostatnie zdj.']);
     if (z !== '' && !lista.some(x => x[0] === String(z))) lista.unshift([String(z), 'zdjęcie nr ' + z]);
     return `<select ${attr} style="${pole};width:150px">${lista.map(([k, t]) => `<option value="${k}" ${k === String(z) ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
