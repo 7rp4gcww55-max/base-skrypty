@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-2
+// @version      2026.11.14-3
 // @description  Zaznacza kolejne strony katalogu i pobiera CSV paczkami po max 10k pozycji
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -29,6 +29,8 @@
   // ===================== USTAWIENIA =====================
   const KLUCZ = 'baseEksportKatalogu';
   const DOMYSLNE = {
+    filtrujAuto: true,       // ustaw filtry przed startem
+    reguly: 'Stan|Co najmniej|1\nEAN|Wartość niepusta|\nBłędy|Różne|Błąd synchronizacji stanu',
     naStronie: 1000,          // ile produktów na stronie ustawić przed startem (0 = nie ruszaj)
     stronNaPaczke: 10,       // ile stron zaznaczyć przed pobraniem (10 x 1000 = 10k)
     format: 'ID-NAZWA-EAN-SKU', // fragment nazwy pozycji w menu Pobierz
@@ -121,6 +123,125 @@
     log('🔎 brak "' + szukaj + '". Widoczne pozycje: ' + unikat.join(' | '));
   }
 
+  // ===================== FILTRY =====================
+  // reguły w formacie:  Pole|Operacja|Wartość   (po jednej w linii, # = komentarz)
+  function parsujReguly(tekst) {
+    return String(tekst || '').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+      .map(l => { const cz = l.split('|').map(x => x.trim()); return { pole: cz[0], operacja: cz[1], wartosc: cz.slice(2).join('|').trim() }; })
+      .filter(r => r.pole && r.operacja);
+  }
+
+  // wpisanie wartości tak, żeby jQuery/select2 to zauważyły
+  function ustawPole(el, wartosc) {
+    const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+    if (d && d.set) d.set.call(el, wartosc); else el.value = wartosc;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function ustawSelect(sel, tekstOpcji) {
+    const opcje = [...sel.options];
+    const o = opcje.find(x => txt(x).toLowerCase() === tekstOpcji.toLowerCase())
+      || opcje.find(x => txt(x).toLowerCase().includes(tekstOpcji.toLowerCase()));
+    if (!o) throw new Error('operacja "' + tekstOpcji + '" niedostępna · jest: ' + opcje.map(x => txt(x)).join(' / '));
+    sel.value = o.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // wybór z listy select2 (pole, wartość słownikowa)
+  async function select2Wybierz(idKontenera, tekst) {
+    const kont = document.getElementById(idKontenera);
+    if (!kont) throw new Error('brak listy ' + idKontenera);
+    kont.click();
+    await spij(250);
+    const szukajka = [...document.querySelectorAll('input.select2-search__field')].find(widoczny);
+    if (szukajka) { ustawPole(szukajka, tekst.slice(0, 24)); await spij(400); }
+    const wynik = await czekajNa(() => {
+      const opcje = [...document.querySelectorAll('li.select2-results__option')].filter(widoczny)
+        .filter(li => !/trwa wyszukiwanie|ładowanie|searching|loading/i.test(txt(li)));
+      if (!opcje.length) return null;
+      const n = tekst.toLowerCase();
+      return opcje.find(li => txt(li).toLowerCase() === n) || opcje.find(li => txt(li).toLowerCase().includes(n)) || null;
+    }, 8000, 150);
+    if (!wynik) {
+      const widok = [...document.querySelectorAll('li.select2-results__option')].filter(widoczny).map(li => txt(li)).slice(0, 15);
+      log('🔎 brak opcji "' + tekst + '". Na liście: ' + widok.join(' | '));
+      throw new Error('nie ma opcji "' + tekst + '"');
+    }
+    wynik.click();
+    await spij(300);
+  }
+
+  async function ustawFiltry() {
+    const reguly = parsujReguly(cfg.reguly);
+    if (!reguly.length) { log('brak reguł filtrowania – pomijam'); return; }
+    const jestPole1 = () => document.getElementById('select2-filter_field_1-container');
+
+    if (!jestPole1()) {
+      const btn = $('#table_inventory_products_container-filters-btn') || kandydaci('Filtrowanie produktów', true)[0];
+      if (!btn) throw new Error('nie widzę przycisku "Filtrowanie produktów"');
+      btn.click();
+      await spij(700);
+    }
+    if (!jestPole1()) {
+      const zaaw = [...document.querySelectorAll('a.btn_toggle_filtering_mode')].find(widoczny)
+        || kandydaci('Filtrowanie zaawansowane', true)[0];
+      if (zaaw) { zaaw.click(); await spij(700); }
+    }
+    if (!await czekajNa(jestPole1, 8000)) throw new Error('nie otworzyło się filtrowanie zaawansowane');
+
+    // skasuj nadmiarowe warunki z poprzedniego razu
+    for (let proba = 0; proba < 8; proba++) {
+      const kasuj = [...document.querySelectorAll('a[class*=filter_remove], a[class*=filter_del], a[class*=filter_minus]')].filter(widoczny);
+      if (kasuj.length <= reguly.length - 1) break;
+      kasuj[kasuj.length - 1].click();
+      await spij(300);
+    }
+
+    log('ustawiam filtry (' + reguly.length + ' warunków)');
+    for (let i = 0; i < reguly.length; i++) {
+      const nr = i + 1, r = reguly[i];
+      if (!document.getElementById('select2-filter_field_' + nr + '-container')) {
+        const oraz = [...document.querySelectorAll('a.btn_filter_add')].find(widoczny) || kandydaci('oraz', true)[0];
+        if (!oraz) throw new Error('brak przycisku "oraz" przy warunku ' + nr);
+        oraz.click();
+        if (!await czekajNa(() => document.getElementById('select2-filter_field_' + nr + '-container'), 6000))
+          throw new Error('nie pojawił się warunek ' + nr);
+        await spij(300);
+      }
+      await select2Wybierz('select2-filter_field_' + nr + '-container', r.pole);
+
+      const sel = await czekajNa(() => document.getElementById('filter_operation_' + nr), 6000);
+      if (!sel) throw new Error('brak listy operacji przy warunku ' + nr);
+      await spij(250);
+      ustawSelect(sel, r.operacja);
+      await spij(400);
+
+      if (r.wartosc) {
+        const input = document.getElementById('filter_value_' + nr);
+        if (input && input.tagName === 'INPUT' && widoczny(input)) {
+          input.click();
+          ustawPole(input, r.wartosc);
+        } else if (document.getElementById('select2-filter_value_' + nr + '-container')) {
+          await select2Wybierz('select2-filter_value_' + nr + '-container', r.wartosc);
+        } else {
+          log('⚠️ warunek ' + nr + ' (' + r.pole + '): nie widzę pola na wartość "' + r.wartosc + '"');
+        }
+        await spij(300);
+      }
+      log('  ✓ ' + r.pole + ' · ' + r.operacja + (r.wartosc ? ' · ' + r.wartosc : ''));
+    }
+
+    const zapisz = [...document.querySelectorAll('a.btn_save_filters')].find(widoczny) || kandydaci('Ustaw filtry', true)[0];
+    if (!zapisz) throw new Error('brak przycisku "Ustaw filtry"');
+    const podpis = podpisTabeli();
+    zapisz.click();
+    await czekajNa(() => podpisTabeli() !== podpis, 25000, 300);
+    await spij(1500);
+    log('filtry ustawione · w katalogu: ' + (licznik().razem || '?'));
+  }
+
   // ===================== KROKI =====================
   // ustaw liczbę produktów na stronie (kontrolka "50 z wielu" w stopce tabeli)
   async function ustawNaStronie(ile) {
@@ -195,6 +316,7 @@
     let paczka = 0, stronRazem = 0, pozycjiRazem = 0;
     try {
       if (licznik().wybrane > 0) { log('czyszczę stare zaznaczenie'); await odznaczWszystko(); }
+      if (cfg.filtrujAuto) await ustawFiltry();
       await ustawNaStronie(cfg.naStronie);
     } catch (e) {
       log('❌ błąd przy przygotowaniu: ' + e.message);
@@ -312,6 +434,23 @@
     return wrap;
   }
 
+  function poleObszar(etykieta, klucz) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:5px 0';
+    const s1 = document.createElement('div');
+    s1.textContent = etykieta;
+    s1.style.cssText = 'margin-bottom:3px';
+    const t = document.createElement('textarea');
+    t.value = cfg[klucz] || '';
+    t.rows = 3;
+    t.spellcheck = false;
+    t.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #456;border-radius:6px;'
+      + 'background:#101822;color:#fff;font:11px/1.4 ui-monospace,monospace;resize:vertical';
+    t.onchange = () => { cfg[klucz] = t.value; zapiszCfg(); };
+    wrap.append(s1, t);
+    return wrap;
+  }
+
   let elInfo;
   function odswiezInfo() {
     if (!elInfo) return;
@@ -332,7 +471,7 @@
 
   function panel() {
     const p = document.createElement('div');
-    p.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9999999;width:290px;background:#1e2a38;color:#e8eef5;'
+    p.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9999999;width:310px;background:#1e2a38;color:#e8eef5;'
       + 'font:12px/1.45 -apple-system,sans-serif;padding:11px 12px;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.55)';
 
     const tyt = document.createElement('div');
@@ -344,6 +483,8 @@
 
     const ust = document.createElement('div');
     ust.append(
+      pole('Ustaw filtry automatycznie', 'filtrujAuto', 'check'),
+      poleObszar('Filtry (Pole|Operacja|Wartość)', 'reguly'),
       pole('Produktów na stronie', 'naStronie'),
       pole('Stron na paczkę', 'stronNaPaczke'),
       pole('Przerwa (ms)', 'przerwa'),
