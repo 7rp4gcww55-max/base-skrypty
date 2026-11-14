@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-1
+// @version      2026.11.14-2
 // @description  Zaznacza kolejne strony katalogu i pobiera CSV paczkami po max 10k pozycji
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -29,6 +29,7 @@
   // ===================== USTAWIENIA =====================
   const KLUCZ = 'baseEksportKatalogu';
   const DOMYSLNE = {
+    naStronie: 1000,          // ile produktów na stronie ustawić przed startem (0 = nie ruszaj)
     stronNaPaczke: 10,       // ile stron zaznaczyć przed pobraniem (10 x 1000 = 10k)
     format: 'ID-NAZWA-EAN-SKU', // fragment nazwy pozycji w menu Pobierz
     przerwa: 900,            // pauza między klikami (ms)
@@ -45,7 +46,11 @@
   // ===================== NARZĘDZIA =====================
   const $ = (s, root = document) => root.querySelector(s);
   const spij = ms => new Promise(r => setTimeout(r, ms));
-  const widoczny = el => !!(el && el.offsetParent !== null);
+  const widoczny = el => {
+    if (!el || !el.getClientRects().length) return false;
+    const st = getComputedStyle(el);
+    return st.visibility !== 'hidden' && st.display !== 'none' && st.opacity !== '0';
+  };
   const txt = el => ((el && el.textContent) || '').replace(/\s+/g, ' ').trim();
   const liczba = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0;
 
@@ -77,29 +82,65 @@
     return w.length + '|' + (w[0].getAttribute('data-id') || txt(w[0]).slice(0, 80));
   };
 
-  // klik pozycji w rozwijanym menu
-  async function klikMenu(btn, szukaj, dokladnie = false) {
-    if (!btn) throw new Error('brak przycisku menu');
+  // klik pozycji w rozwijanym menu (preferuje to, co pojawiło się PO kliknięciu)
+  function kandydaci(szukaj, dokladnie) {
     const czysc = s => s.toLowerCase().replace(/[^0-9a-ząćęłńóśźż \-\[\]]/gi, '').replace(/\s+/g, ' ').trim();
     const szuk = czysc(szukaj);
-    const pasuje = el => {
+    const lista = [...document.querySelectorAll('a, button, li, label, span, div')].filter(el => {
+      if (!widoczny(el)) return false;
       const t = czysc(txt(el));
       if (!t) return false;
       return dokladnie ? t === szuk : t.includes(szuk);
-    };
-    const znajdz = () => {
-      const kand = [...document.querySelectorAll('a, button, li, label')].filter(el => widoczny(el) && pasuje(el));
-      // najgłębszy pasujący element (żeby nie kliknąć całego kontenera menu)
-      return kand.find(el => !kand.some(inny => inny !== el && el.contains(inny))) || null;
-    };
-    if (!znajdz()) { btn.click(); await spij(250); }
-    const poz = await czekajNa(znajdz, 8000);
-    if (!poz) throw new Error('nie znalazłem w menu: "' + szukaj + '"');
+    });
+    // tylko najgłębsze trafienia (bez kontenerów opakowujących)
+    return lista.filter(el => !lista.some(inny => inny !== el && el.contains(inny)));
+  }
+
+  async function klikMenu(btn, szukaj, dokladnie = false, opis = '') {
+    if (!btn) throw new Error('brak przycisku menu' + (opis ? ' (' + opis + ')' : ''));
+    const przed = new Set(kandydaci(szukaj, dokladnie));
+    btn.click();
+    const poz = await czekajNa(() => {
+      const teraz = kandydaci(szukaj, dokladnie);
+      return teraz.find(el => !przed.has(el)) || teraz[0] || null;
+    }, 8000, 150);
+    if (!poz) {
+      diagnostyka(szukaj);
+      throw new Error('nie znalazłem w menu: "' + szukaj + '"');
+    }
     poz.click();
     return poz;
   }
 
+  // wypisz do loga co w ogóle widać w otwartym menu – żeby było wiadomo czego szukać
+  function diagnostyka(szukaj) {
+    const widok = [...document.querySelectorAll('a, button, label, li')]
+      .filter(el => widoczny(el) && txt(el).length > 1 && txt(el).length < 40 && el.getClientRects()[0].width < 420)
+      .map(el => txt(el));
+    const unikat = [...new Set(widok)].slice(0, 25);
+    log('🔎 brak "' + szukaj + '". Widoczne pozycje: ' + unikat.join(' | '));
+  }
+
   // ===================== KROKI =====================
+  // ustaw liczbę produktów na stronie (kontrolka "50 z wielu" w stopce tabeli)
+  async function ustawNaStronie(ile) {
+    if (!ile) return;
+    if (wiersze().length === ile) { log('na stronie już ' + ile + ' – pomijam'); return; }
+    const stopka = $(SEL.kontener + ' .table-footer') || document.body;
+    const kontrolka = [...stopka.querySelectorAll('a, button, label')]
+      .find(el => widoczny(el) && /^\d+\s*(z wielu|\/)?/i.test(txt(el)) && /z wielu|na stron/i.test(txt(el)))
+      || [...stopka.querySelectorAll('a.item-sm.w-sm, a.item-sm.item-transparent.w-sm')].find(widoczny);
+    if (!kontrolka) { log('⚠️ nie widzę kontrolki ilości na stronie – ustaw ' + ile + ' ręcznie'); return; }
+    log('ustawiam ' + ile + ' produktów na stronie');
+    const podpis = podpisTabeli();
+    await klikMenu(kontrolka, String(ile), true, 'ilość na stronie');
+    const ok = await czekajNa(() => wiersze().length > 0 && podpisTabeli() !== podpis, 60000, 400);
+    if (!ok) throw new Error('tabela nie przeładowała się po zmianie na ' + ile + '/stronę');
+    await spij(Math.max(cfg.settle, 1500));
+    const teraz = wiersze().length;
+    if (teraz !== ile) log('⚠️ na stronie jest ' + teraz + ' zamiast ' + ile);
+  }
+
   async function zaznaczStrone() {
     const przed = licznik().wybrane;
     const spodziewane = wiersze().length;
@@ -152,15 +193,20 @@
     stan = 'lecimy';
     rysujPrzyciski();
     let paczka = 0, stronRazem = 0, pozycjiRazem = 0;
+    try {
+      if (licznik().wybrane > 0) { log('czyszczę stare zaznaczenie'); await odznaczWszystko(); }
+      await ustawNaStronie(cfg.naStronie);
+    } catch (e) {
+      log('❌ błąd przy przygotowaniu: ' + e.message);
+      postep('Błąd – zatrzymane'); stan = 'stop'; rysujPrzyciski(); return;
+    }
     const l0 = licznik();
-    const naStronie = wiersze().length || 1000;
+    const naStronie = wiersze().length || cfg.naStronie || 1000;
     const stronWszystkich = l0.razem ? Math.ceil(l0.razem / naStronie) : 0;
     log('▶️ start · ' + naStronie + '/stronę · ' + cfg.stronNaPaczke + ' stron na paczkę ('
       + (naStronie * cfg.stronNaPaczke) + ' poz.) · w katalogu: ' + (l0.razem || '?'));
 
     try {
-      if (licznik().wybrane > 0) { log('czyszczę stare zaznaczenie'); await odznaczWszystko(); }
-
       for (;;) {
         paczka++;
         let wPaczce = 0;
@@ -269,12 +315,14 @@
   let elInfo;
   function odswiezInfo() {
     if (!elInfo) return;
-    const naStronie = wiersze().length;
+    const teraz = wiersze().length;
+    const naStronie = cfg.naStronie || teraz;
     const l = licznik();
     const paczka = naStronie * cfg.stronNaPaczke;
     elInfo.innerHTML = '';
     const d1 = document.createElement('div');
-    d1.textContent = 'Na stronie: ' + (naStronie || '?') + ' · w katalogu: ' + (l.razem || '?') + ' · zaznaczone: ' + l.wybrane;
+    d1.textContent = 'Na stronie: ' + (teraz || '?') + (cfg.naStronie && teraz !== cfg.naStronie ? ' → ustawię ' + cfg.naStronie : '')
+      + ' · w katalogu: ' + (l.razem || '?') + ' · zaznaczone: ' + l.wybrane;
     const d2 = document.createElement('div');
     d2.textContent = 'Paczka = ' + (paczka || '?') + ' pozycji';
     if (paczka > 10000) { d2.textContent += ' ⚠️ ponad limit 10k'; d2.style.color = '#ff8a80'; }
@@ -296,6 +344,7 @@
 
     const ust = document.createElement('div');
     ust.append(
+      pole('Produktów na stronie', 'naStronie'),
       pole('Stron na paczkę', 'stronNaPaczke'),
       pole('Przerwa (ms)', 'przerwa'),
       pole('Czekaj po pobraniu (ms)', 'poPobraniu'),
@@ -306,7 +355,7 @@
     );
 
     elPostep = document.createElement('div');
-    elPostep.textContent = 'Gotowy. Ustaw filtry i liczbę na stronie, potem START.';
+    elPostep.textContent = 'Gotowy. Ustaw filtry w katalogu, potem START.';
     elPostep.style.cssText = 'margin:8px 0 6px;padding:6px 7px;background:#101822;border-radius:7px;font-size:11px;min-height:28px';
 
     elPrzyciski = document.createElement('div');
