@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-7
+// @version      2026.11.14-8
 // @description  Ustawia katalog, filtry i 1000/stronę, zaznacza kolejne strony i pobiera CSV paczkami po max 10k
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -173,7 +173,7 @@
         if (!w.length) return null;
         if (ile && w.length !== ile) return null;
         return pierwszyWiersz() || null;
-      }, 45000, 300);
+      }, 60000, 300);
       if (!id) throw new Error('strona ' + nr + ' się nie wczytała (widzę stronę ' + aktualnaStrona() + ', wierszy ' + wiersze().length + ' z ' + ile + ')');
       await spij(Math.max(cfg.settle, 600));
       if (pierwszyWiersz() === id && (!ile || wiersze().length === ile)) return true;
@@ -228,8 +228,22 @@
         throw new Error('nie dotarłem na stronę ' + nr);
       }
     }
-    await czekajNaStrone(nr, ile);
+    await czekajNaStrone(nr, ile || null);
     return true;
+  }
+
+  const jestOstatniaStrona = () => { const n = linkNastepna(); return !n || n.wyl; };
+
+  // ile pozycji ma bieżąca strona: pełne strony = rozmiar strony, ostatnia = tyle ile się wczytało
+  async function ileNaTejStronie(nr) {
+    const rozmiar = iloscNaStronie() || cfg.naStronie || 0;
+    if (!jestOstatniaStrona() && rozmiar) { await czekajNaStrone(nr, rozmiar); return rozmiar; }
+    // ostatnia strona (albo nieznany rozmiar) – czekaj aż liczba wierszy przestanie się zmieniać
+    await czekajNaStrone(nr, null);
+    let ile = wiersze().length;
+    for (;;) { await spij(800); const t = wiersze().length; if (t === ile) break; ile = t; }
+    if (!ile) throw new Error('strona ' + nr + ' jest pusta');
+    return ile;
   }
 
   // ===================== PRZYGOTOWANIE =====================
@@ -415,43 +429,45 @@
       for (;;) {
         if (!await czekajJakPauza()) throw new Error('STOP');
 
-        const naStr = cfg.naStronie || wiersze().length || 1000;
+        // Base liczy pozycje leniwie – daj mu chwilę, ale nie uzależniaj od tego pętli
+        await czekajNa(() => razemWKatalogu() > 0 || ostatniaStronaPagera() > 1 || jestOstatniaStrona(), 20000, 500);
         const razem = razemWKatalogu();
-        const stronWszystkich = razem ? Math.ceil(razem / naStr) : (ostatniaStronaPagera() || 0);
-        if (!stronWszystkich) throw new Error('nie umiem policzyć liczby stron');
-        if (s.stronaStart > stronWszystkich) { log('nie ma już stron do pobrania'); zapiszStan(null); break; }
+        const stronWszystkich = razem && iloscNaStronie() ? Math.ceil(razem / iloscNaStronie()) : ostatniaStronaPagera();
+        const opisStron = stronWszystkich || '?';
+        const doStrony = s.stronaStart + cfg.stronNaPaczke - 1;
+        log('📄 paczka ' + (s.paczka + 1) + ': strony ' + s.stronaStart + '-' + doStrony
+          + ' z ' + opisStron + (razem ? ' (w katalogu ' + razem + ')' : ''));
 
-        const doStrony = Math.min(s.stronaStart + cfg.stronNaPaczke - 1, stronWszystkich);
-        const ileNaStronie = p => (p < stronWszystkich ? naStr : razem - (stronWszystkich - 1) * naStr);
-        let oczekiwaneRazem = 0;
-        log('📄 paczka ' + (s.paczka + 1) + ': strony ' + s.stronaStart + '-' + doStrony + ' z ' + stronWszystkich + ' (w katalogu ' + razem + ')');
-
+        let oczekiwaneRazem = 0, koniecKatalogu = false, ostatniaPobrana = s.stronaStart;
         for (let nr = s.stronaStart; nr <= doStrony; nr++) {
           if (!await czekajJakPauza()) throw new Error('STOP');
-          const ile = ileNaStronie(nr);
-          await przejdzNaStrone(nr, ile);
+          await przejdzNaStrone(nr, null);
+          const ile = await ileNaTejStronie(nr);
           const wyb = await zaznaczStrone(ile);
           oczekiwaneRazem += ile;
-          postep('Paczka ' + (s.paczka + 1) + ' · strona ' + nr + '/' + stronWszystkich + ' · zaznaczone ' + wyb);
+          ostatniaPobrana = nr;
+          postep('Paczka ' + (s.paczka + 1) + ' · strona ' + nr + '/' + opisStron + ' · zaznaczone ' + wyb);
           if (wyb !== oczekiwaneRazem) throw new Error('po stronie ' + nr + ' zaznaczone ' + wyb + ', powinno być ' + oczekiwaneRazem);
+          if (jestOstatniaStrona()) { koniecKatalogu = true; log('ostatnia strona katalogu (' + nr + ')'); break; }
           await spij(cfg.przerwa);
         }
 
         const wybrane = licznik().wybrane;
+        if (!wybrane) throw new Error('nic nie jest zaznaczone – nie pobieram');
         if (wybrane !== oczekiwaneRazem) throw new Error('przed pobraniem zaznaczone ' + wybrane + ' zamiast ' + oczekiwaneRazem);
 
         s.paczka++; s.pozycji += wybrane;
-        log('⬇️ paczka ' + s.paczka + ': pobieram ' + wybrane + ' poz. (strony ' + s.stronaStart + '-' + doStrony + ')');
+        log('⬇️ paczka ' + s.paczka + ': pobieram ' + wybrane + ' poz. (strony ' + s.stronaStart + '-' + ostatniaPobrana + ')');
         await pobierzCsv();
-        log('✅ paczka ' + s.paczka + ' · razem ' + s.pozycji + '/' + razem);
+        log('✅ paczka ' + s.paczka + ' · razem ' + s.pozycji + (razem ? '/' + razem : ''));
 
-        s.stronaStart = doStrony + 1;
-        if (doStrony >= stronWszystkich || (cfg.limitPaczek && s.paczka >= cfg.limitPaczek)) {
-          const brak = razem - s.pozycji;
+        s.stronaStart = ostatniaPobrana + 1;
+        if (koniecKatalogu || (cfg.limitPaczek && s.paczka >= cfg.limitPaczek)) {
+          const brak = razem ? razem - s.pozycji : 0;
           postep('Gotowe · ' + s.paczka + ' plików · ' + s.pozycji + ' pozycji');
-          log('🏁 koniec: ' + s.paczka + ' plików, ' + s.pozycji + ' z ' + razem + ' pozycji'
-            + (doStrony >= stronWszystkich && brak > 0 ? ' ⚠️ brakuje ' + brak : ''));
-          powiadom('✅ Base eksport katalogu', s.paczka + ' plików, ' + s.pozycji + '/' + razem + ' pozycji');
+          log('🏁 koniec: ' + s.paczka + ' plików, ' + s.pozycji + (razem ? ' z ' + razem : '') + ' pozycji'
+            + (koniecKatalogu && brak > 0 ? ' ⚠️ brakuje ' + brak : ''));
+          powiadom('✅ Base eksport katalogu', s.paczka + ' plików, ' + s.pozycji + ' pozycji');
           zapiszStan(null);
           break;
         }
