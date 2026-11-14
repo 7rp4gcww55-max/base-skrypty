@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-5
+// @version      2026.11.14-6
 // @description  Ustawia katalog, filtry i 1000/stronę, zaznacza kolejne strony i pobiera CSV paczkami po max 10k
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -39,6 +39,7 @@
     reguly: 'Stan|Co najmniej|1\nEAN|Wartość niepusta|\nBłędy|Różne|Błąd synchronizacji stanu',
     naStronie: 1000,          // produktów na stronie (0 = nie zmieniaj)
     stronNaPaczke: 10,        // 10 x 1000 = 10k na plik
+    odStrony: 0,              // od której strony zacząć (0 = od pierwszej)
     format: 'ID-NAZWA-EAN-SKU',
     przerwa: 900,
     poPobraniu: 6000,
@@ -86,6 +87,20 @@
   const wiersze = () => [...document.querySelectorAll(SEL.kontener + ' table tbody tr')]
     .filter(tr => tr.querySelector('input[type=checkbox]'));
   const podpisTabeli = () => { const w = wiersze(); return w.length ? w.length + '|' + (w[0].getAttribute('data-id') || txt(w[0]).slice(0, 60)) : ''; };
+  const razemWKatalogu = () => {
+    const z = liczba(txt($('.table_pager_all_items_counter')));
+    if (z) return z;
+    const k = kontrolkaIlosci();
+    return k ? liczba(txt(k).split(/\s+z\s+/i)[1]) : 0;
+  };
+  const ostatniaStronaPagera = () => {
+    const nry = [...document.querySelectorAll('ul.pager_container a')].filter(widoczny).map(a => liczba(txt(a))).filter(n => n > 0);
+    return nry.length ? Math.max(...nry) : 0;
+  };
+  const kontrolkaIlosci = () => [...document.querySelectorAll('a, span, label')]
+    .find(el => widoczny(el) && /^\d+\s+z\s+(\d+|wielu)$/i.test(txt(el)));
+  const iloscNaStronie = () => { const k = kontrolkaIlosci(); return k ? liczba(txt(k).split(/\s+z\s+/i)[0]) : 0; };
+  const pierwszyWiersz = () => { const w = wiersze()[0]; return w ? (w.getAttribute('data-id') || txt(w).slice(0, 40)) : ''; };
   const aktualnaStrona = () => liczba(txt([...document.querySelectorAll('ul.pager_container li.active')].find(widoczny))) || 0;
 
   function ustawWartosc(el, w) {
@@ -149,6 +164,22 @@
     return null;
   }
 
+  async function czekajNaStrone(nr, ile) {
+    for (let proba = 0; proba < 3; proba++) {
+      const id = await czekajNa(() => {
+        if (nr && aktualnaStrona() !== nr) return null;
+        const w = wiersze();
+        if (!w.length) return null;
+        if (ile && w.length !== ile) return null;
+        return pierwszyWiersz() || null;
+      }, 45000, 300);
+      if (!id) throw new Error('strona ' + nr + ' się nie wczytała (widzę stronę ' + aktualnaStrona() + ', wierszy ' + wiersze().length + ' z ' + ile + ')');
+      await spij(Math.max(cfg.settle, 600));
+      if (pierwszyWiersz() === id && (!ile || wiersze().length === ile)) return true;
+    }
+    throw new Error('strona ' + nr + ' ciągle się przeładowuje');
+  }
+
   async function nastepnaStrona() {
     const n = linkNastepna();
     if (!n || n.wyl) return false;
@@ -186,6 +217,18 @@
       if (!await nastepnaStrona()) return false;
     }
     return aktualnaStrona() === nr;
+  }
+
+  async function przejdzNaStrone(nr, ile) {
+    if (aktualnaStrona() !== nr) {
+      if (aktualnaStrona() + 1 === nr) {
+        if (!await nastepnaStrona()) throw new Error('nie ma linku na stronę ' + nr);
+      } else if (!await naStroneNr(nr)) {
+        throw new Error('nie dotarłem na stronę ' + nr);
+      }
+    }
+    await czekajNaStrone(nr, ile);
+    return true;
   }
 
   // ===================== PRZYGOTOWANIE =====================
@@ -309,26 +352,33 @@
   }
 
   async function ustawNaStronie(ile) {
-    if (!ile || wiersze().length === ile) return;
-    const kontrolka = [...document.querySelectorAll('a, button, label, span')]
-      .filter(el => widoczny(el) && /z wielu/i.test(txt(el)) && txt(el).length < 25).pop();
+    if (!ile || iloscNaStronie() === ile) return;
+    const kontrolka = kontrolkaIlosci();
     if (!kontrolka) { log('⚠️ nie widzę kontrolki „Produktów na stronę" – ustaw ' + ile + ' ręcznie'); return; }
     const podpis = podpisTabeli();
     await klikMenu(kontrolka, String(ile), true);
-    if (!await czekajNa(() => wiersze().length > 0 && podpisTabeli() !== podpis, 60000, 400))
+    if (!await czekajNa(() => wiersze().length > 0 && iloscNaStronie() === ile && podpisTabeli() !== podpis, 60000, 400))
       throw new Error('tabela nie przeładowała się po zmianie na ' + ile + '/stronę');
     await spij(Math.max(cfg.settle, 1500));
-    log(wiersze().length + ' produktów na stronie');
+    log(iloscNaStronie() + ' produktów na stronie');
   }
 
   // ===================== KROKI PĘTLI =====================
-  async function zaznaczStrone() {
+  async function zaznaczStrone(oczekiwane) {
     const przed = licznik().wybrane;
-    const poz = await pozycjaZaznaczania('Zaznacz wszystkie');
-    mysz(poz);
-    if (!await czekajNa(() => licznik().wybrane > przed, 15000))
-      throw new Error('zaznaczenie strony nie zwiększyło licznika (' + przed + ')');
-    return licznik().wybrane;
+    for (let proba = 1; proba <= 3; proba++) {
+      const poz = await pozycjaZaznaczania('Zaznacz wszystkie');
+      mysz(poz);
+      if (await czekajNa(() => licznik().wybrane >= przed + oczekiwane, 30000, 250)) break;
+      log('⚠️ strona ' + aktualnaStrona() + ': zaznaczyło ' + (licznik().wybrane - przed) + '/' + oczekiwane + ' – powtarzam (' + proba + '/3)');
+      await spij(2000);
+    }
+    // licznik Base dolicza się chwilę – poczekaj aż przestanie rosnąć
+    let stabilny = licznik().wybrane;
+    for (;;) { await spij(700); const t = licznik().wybrane; if (t === stabilny) break; stabilny = t; }
+    const delta = stabilny - przed;
+    if (delta < oczekiwane) throw new Error('strona ' + aktualnaStrona() + ': zaznaczone ' + delta + ' z ' + oczekiwane);
+    return stabilny;
   }
 
   async function pobierzCsv() {
@@ -345,7 +395,7 @@
     rysujPrzyciski();
     let s = czytajStan();
     if (!wznowienie || !s) {
-      s = { paczka: 0, stronaStart: 1, pozycji: 0, start: Date.now() };
+      s = { paczka: 0, stronaStart: Math.max(1, cfg.odStrony || 1), pozycji: 0, start: Date.now() };
       zapiszStan(s);
     }
 
@@ -356,41 +406,55 @@
         await ustawNaStronie(cfg.naStronie);
       } else {
         log('▶️ wznawiam po przeładowaniu – paczka ' + (s.paczka + 1) + ', od strony ' + s.stronaStart);
-        if (cfg.naStronie && wiersze().length !== cfg.naStronie) await ustawNaStronie(cfg.naStronie);
+        if (cfg.naStronie && iloscNaStronie() !== cfg.naStronie) await ustawNaStronie(cfg.naStronie);
       }
 
       if (licznik().wybrane > 0) { log('zostało stare zaznaczenie – przeładowuję'); return przeladuj(s); }
 
       for (;;) {
         if (!await czekajJakPauza()) throw new Error('STOP');
-        if (!await naStroneNr(s.stronaStart)) throw new Error('nie dotarłem na stronę ' + s.stronaStart);
 
-        let stron = 0;
-        for (let i = 0; i < cfg.stronNaPaczke; i++) {
+        const naStr = cfg.naStronie || wiersze().length || 1000;
+        const razem = razemWKatalogu();
+        const stronWszystkich = razem ? Math.ceil(razem / naStr) : (ostatniaStronaPagera() || 0);
+        if (!stronWszystkich) throw new Error('nie umiem policzyć liczby stron');
+        if (s.stronaStart > stronWszystkich) { log('nie ma już stron do pobrania'); zapiszStan(null); break; }
+
+        const doStrony = Math.min(s.stronaStart + cfg.stronNaPaczke - 1, stronWszystkich);
+        const ileNaStronie = p => (p < stronWszystkich ? naStr : razem - (stronWszystkich - 1) * naStr);
+        let oczekiwaneRazem = 0;
+        log('📄 paczka ' + (s.paczka + 1) + ': strony ' + s.stronaStart + '-' + doStrony + ' z ' + stronWszystkich + ' (w katalogu ' + razem + ')');
+
+        for (let nr = s.stronaStart; nr <= doStrony; nr++) {
           if (!await czekajJakPauza()) throw new Error('STOP');
-          const wyb = await zaznaczStrone();
-          stron++;
-          postep('Paczka ' + (s.paczka + 1) + ' · strona ' + aktualnaStrona() + ' · zaznaczone ' + wyb);
+          const ile = ileNaStronie(nr);
+          await przejdzNaStrone(nr, ile);
+          const wyb = await zaznaczStrone(ile);
+          oczekiwaneRazem += ile;
+          postep('Paczka ' + (s.paczka + 1) + ' · strona ' + nr + '/' + stronWszystkich + ' · zaznaczone ' + wyb);
+          if (wyb !== oczekiwaneRazem) throw new Error('po stronie ' + nr + ' zaznaczone ' + wyb + ', powinno być ' + oczekiwaneRazem);
           await spij(cfg.przerwa);
-          if (i < cfg.stronNaPaczke - 1 && !await nastepnaStrona()) { log('ostatnia strona katalogu'); break; }
         }
 
         const wybrane = licznik().wybrane;
-        s.paczka++; s.pozycji += wybrane;
-        log('⬇️ paczka ' + s.paczka + ': pobieram ' + wybrane + ' poz. (' + stron + " stron, do strony " + aktualnaStrona() + ')');
-        await pobierzCsv();
-        log('✅ paczka ' + s.paczka + ' · razem ' + s.pozycji);
+        if (wybrane !== oczekiwaneRazem) throw new Error('przed pobraniem zaznaczone ' + wybrane + ' zamiast ' + oczekiwaneRazem);
 
-        const koniec = (() => { const n = linkNastepna(); return !n || n.wyl; })();
-        if (koniec || (cfg.limitPaczek && s.paczka >= cfg.limitPaczek)) {
+        s.paczka++; s.pozycji += wybrane;
+        log('⬇️ paczka ' + s.paczka + ': pobieram ' + wybrane + ' poz. (strony ' + s.stronaStart + '-' + doStrony + ')');
+        await pobierzCsv();
+        log('✅ paczka ' + s.paczka + ' · razem ' + s.pozycji + '/' + razem);
+
+        s.stronaStart = doStrony + 1;
+        if (doStrony >= stronWszystkich || (cfg.limitPaczek && s.paczka >= cfg.limitPaczek)) {
+          const brak = razem - s.pozycji;
           postep('Gotowe · ' + s.paczka + ' plików · ' + s.pozycji + ' pozycji');
-          log('🏁 koniec: ' + s.paczka + ' plików, ' + s.pozycji + ' pozycji');
-          powiadom('✅ Base eksport katalogu', s.paczka + ' plików, ' + s.pozycji + ' pozycji');
+          log('🏁 koniec: ' + s.paczka + ' plików, ' + s.pozycji + ' z ' + razem + ' pozycji'
+            + (doStrony >= stronWszystkich && brak > 0 ? ' ⚠️ brakuje ' + brak : ''));
+          powiadom('✅ Base eksport katalogu', s.paczka + ' plików, ' + s.pozycji + '/' + razem + ' pozycji');
           zapiszStan(null);
           break;
         }
-        // tylko przeładowanie czyści zaznaczenie w Base
-        s.stronaStart = s.stronaStart + stron;
+        // Base czyści całe zaznaczenie tylko przy przeładowaniu strony
         return przeladuj(s);
       }
     } catch (e) {
@@ -487,7 +551,7 @@
 
   function odswiezInfo() {
     if (!elInfo) return;
-    const teraz = wiersze().length;
+    const teraz = iloscNaStronie() || wiersze().length;
     const naStronie = cfg.naStronie || teraz;
     const l = licznik();
     const paczka = naStronie * cfg.stronNaPaczke;
@@ -517,6 +581,7 @@
       poleObszar('Filtry (Pole|Operacja|Wartość)', 'reguly'),
       pole('Produktów na stronie', 'naStronie'),
       pole('Stron na paczkę', 'stronNaPaczke'),
+      pole('Zacznij od strony (0=1)', 'odStrony'),
       pole('Przerwa (ms)', 'przerwa'),
       pole('Czekaj po pobraniu (ms)', 'poPobraniu'),
       pole('Limit paczek (0=brak)', 'limitPaczek'),
