@@ -9,6 +9,7 @@ Otwórz link, Tampermonkey pokaże okno instalacji → **Zainstaluj** / **Aktual
 - AutoMap (auto-mapowanie, wystawianie): https://raw.githubusercontent.com/7rp4gcww55-max/base-skrypty/main/base-automap.user.js
 - Strażnik: https://raw.githubusercontent.com/7rp4gcww55-max/base-skrypty/main/base-automap-straznik.user.js
 - Nowe sklepy: https://raw.githubusercontent.com/7rp4gcww55-max/base-skrypty/main/base-nowe-sklepy.user.js
+- Eksport katalogu paczkami po 10k (CSV ID-NAZWA-EAN-SKU): https://raw.githubusercontent.com/7rp4gcww55-max/base-skrypty/main/base-eksport-katalogu.user.js
 
 ## Narzędzia w przeglądarce
 
