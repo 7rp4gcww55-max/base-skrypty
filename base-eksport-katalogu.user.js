@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-8
+// @version      2026.11.14-9
 // @description  Ustawia katalog, filtry i 1000/stronę, zaznacza kolejne strony i pobiera CSV paczkami po max 10k
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -378,6 +378,24 @@
     log(iloscNaStronie() + ' produktów na stronie');
   }
 
+  // Base po zmianie filtrów pokazuje "z wielu" – sumę podaje dopiero przy zaznaczeniu.
+  // Zaznaczamy więc jedną stronę, odczytujemy sumę i od razu odznaczamy.
+  async function policzPozycje() {
+    if (razemWKatalogu() > 0) return razemWKatalogu();
+    await czekajNa(() => razemWKatalogu() > 0, 8000, 500);
+    if (razemWKatalogu() > 0) return razemWKatalogu();
+    log('liczę pozycje w katalogu…');
+    const poz = await pozycjaZaznaczania('Zaznacz wszystkie');
+    mysz(poz);
+    await czekajNa(() => licznik().razem > 0, 20000, 300);
+    const suma = licznik().razem || razemWKatalogu();
+    const od = await pozycjaZaznaczania('Odznacz wszystkie');
+    mysz(od);
+    await czekajNa(() => licznik().wybrane === 0, 15000, 300);
+    await spij(600);
+    return suma;
+  }
+
   // ===================== KROKI PĘTLI =====================
   async function zaznaczStrone(oczekiwane) {
     const przed = licznik().wybrane;
@@ -419,6 +437,9 @@
         await ustawKatalog((cfg.katalog || '').trim());
         if (cfg.filtrujAuto) await ustawFiltry();
         await ustawNaStronie(cfg.naStronie);
+        const ile = await policzPozycje();
+        const rozm = iloscNaStronie() || cfg.naStronie;
+        log('📊 z tymi filtrami: ' + (ile || '?') + ' pozycji' + (ile && rozm ? ' · ' + Math.ceil(ile / rozm) + ' stron · ' + Math.ceil(ile / (rozm * cfg.stronNaPaczke)) + ' plików' : ''));
       } else {
         log('▶️ wznawiam po przeładowaniu – paczka ' + (s.paczka + 1) + ', od strony ' + s.stronaStart);
         if (cfg.naStronie && iloscNaStronie() !== cfg.naStronie) await ustawNaStronie(cfg.naStronie);
@@ -429,9 +450,7 @@
       for (;;) {
         if (!await czekajJakPauza()) throw new Error('STOP');
 
-        // Base liczy pozycje leniwie – daj mu chwilę, ale nie uzależniaj od tego pętli
-        await czekajNa(() => razemWKatalogu() > 0 || ostatniaStronaPagera() > 1 || jestOstatniaStrona(), 20000, 500);
-        const razem = razemWKatalogu();
+        const razem = await policzPozycje();
         const stronWszystkich = razem && iloscNaStronie() ? Math.ceil(razem / iloscNaStronie()) : ostatniaStronaPagera();
         const opisStron = stronWszystkich || '?';
         const doStrony = s.stronaStart + cfg.stronNaPaczke - 1;
@@ -443,6 +462,11 @@
           if (!await czekajJakPauza()) throw new Error('STOP');
           await przejdzNaStrone(nr, null);
           const ile = await ileNaTejStronie(nr);
+          const odcisk = pierwszyWiersz();
+          s.odciski = s.odciski || {};
+          const byla = s.odciski[odcisk];
+          if (byla && byla !== nr) throw new Error('strona ' + nr + ' ma tę samą zawartość co strona ' + byla + ' – przerywam, żeby nie pobrać dwa razy tego samego');
+          s.odciski[odcisk] = nr;
           const wyb = await zaznaczStrone(ile);
           oczekiwaneRazem += ile;
           ostatniaPobrana = nr;
@@ -488,6 +512,7 @@
   }
 
   function przeladuj(s) {
+    s.ostatni = Date.now();
     zapiszStan(s);
     log('↻ przeładowuję, żeby wyczyścić zaznaczenie…');
     postep('Przeładowanie · dalej od strony ' + s.stronaStart);
@@ -574,7 +599,8 @@
     const paczka = naStronie * cfg.stronNaPaczke;
     elInfo.innerHTML = '';
     const d1 = document.createElement('div');
-    d1.textContent = 'Na stronie: ' + (teraz || '?') + (cfg.naStronie && teraz !== cfg.naStronie ? ' → ustawię ' + cfg.naStronie : '')
+    const wKatalogu = razemWKatalogu() || l.razem;
+    d1.textContent = 'W katalogu: ' + (wKatalogu || '?') + ' · na stronie: ' + (teraz || '?')
       + ' · strona ' + (aktualnaStrona() || '?') + ' · zaznaczone: ' + l.wybrane;
     const d2 = document.createElement('div');
     d2.textContent = 'Paczka = ' + (paczka || '?') + ' pozycji';
@@ -674,11 +700,13 @@
     if (!await czekajNa(() => $(SEL.btnZaznacz) && $(SEL.btnPobierz), 25000)) return;
     panel();
     const s = czytajStan();
-    if (s && Date.now() - (s.start || 0) < 6 * 3600000) {
+    if (s && Date.now() - (s.ostatni || s.start || 0) < 10 * 60000) {
       postep('Wznawiam za 3 s · paczka ' + (s.paczka + 1) + ' od strony ' + s.stronaStart);
-      log('znaleziony zapisany stan – wznawiam za 3 s (STOP przerwie)');
+      log('wznawiam przerwany przebieg za 3 s (STOP przerwie)');
       await spij(3000);
       if (stan === 'stop') lec(true);
+    } else if (s) {
+      postep('Jest stary niedokończony przebieg (od strony ' + s.stronaStart + '). WZNÓW albo reset → START od początku.');
     }
   })();
 })();
