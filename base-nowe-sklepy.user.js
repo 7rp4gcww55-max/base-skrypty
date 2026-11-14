@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.32
+// @version      1.33
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -327,8 +327,7 @@
     if (!lista.length) return alert('Nie ma czego powtarzać – wszystko przeszło ✔');
     const nowe = lista.map(s => {
       const ok = {}; if (tryb !== 'wszystko') for (const k of K) if (s.ok[k] === true) ok[k] = true;
-      const war = z.warunki || [];
-      return { ...s, ok, proby: {}, odswC: ok.warunki ? s.odswC : !war.includes('cennik'), odswP: ok.warunki ? s.odswP : !war.includes('producent') };
+      return { ...s, ok, proby: {}, odswC: ok.warunki ? s.odswC : false, odswP: ok.warunki ? s.odswP : false };
     });
     const opis = nowe.map(s => s.sklep + ': ' + K.filter(k => !s.ok[k]).map(k => OPIS[k]).join(', ')).join('\n');
     if (!confirm('Powtórzyć (' + z.hurtownia + ')?\n\n' + opis)) return;
@@ -527,7 +526,7 @@
       zapiszWiersze(k);
       pisz(L_LOG, []);
       zapiszZad({ hurtownia: k, kroki, warunki: war, tylkoZnajdzKatalog, start: Date.now(),
-        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, ...(w.nazwa ? { nazwa: w.nazwa } : {}), mnoznik: (+w.mnoznik).toFixed(2), zdjecie: zN(w.zdjecie), czas: w.czas, ok: {}, proby: {}, odswC: !war.includes('cennik'), odswP: !war.includes('producent') })) });
+        sklepy: wiersze.map(w => ({ sklep: w.sklep, nr: +w.nr, ...(w.nazwa ? { nazwa: w.nazwa } : {}), mnoznik: (+w.mnoznik).toFixed(2), zdjecie: zN(w.zdjecie), czas: w.czas, ok: {}, proby: {}, odswC: false, odswP: false })) });
       log('START ' + k + ': ' + wiersze.map(w => w.sklep).join(', '));
       powiadom('Start nowych sklepów', k + ': ' + wiersze.map(w => w.sklep).join(', '));
       o.remove(); rysujPanel(); setTimeout(silnik, 500);
@@ -809,7 +808,7 @@
     return 'ok';
   };
 
-  // 3b) cenniki dostaw i warunki: odśwież z Allegro (cenniki, producenci), potem wybierz w integracji konta
+  // 3b) cenniki dostaw i warunki: NAJPIERW odśwież z Allegro (cenniki dostaw + warunki, producenci odpowiedzialni), dopiero potem wybieraj w integracji konta
   async function odswiezZAllegro(przycisk, sklep) {
     const b = await czekajNa(() => [...document.querySelectorAll('button')].find(x => x.textContent.includes(przycisk) && widoczny(x)), 30000);
     if (!b) return 'brak przycisku „' + przycisk + '”';
@@ -822,9 +821,9 @@
   }
   KROK.warunki = async (z, s) => {
     const war = z.warunki || WARUNKI.map(w => w[0]);
-    if ((!s.odswC && !war.includes('cennik')) || (!s.odswP && !war.includes('producent'))) { if (!war.includes('cennik')) s.odswC = true; if (!war.includes('producent')) s.odswP = true; return 'dalej'; }
-    if (!s.odswC) { log('   cenniki z Allegro: ' + await odswiezZAllegro('Odśwież cenniki', s.sklep)); s.odswC = true; return 'dalej'; }
-    if (!s.odswP) { log('   producenci z Allegro: ' + await odswiezZAllegro('Odśwież producentów', s.sklep)); s.odswP = true; return 'dalej'; }
+    // ZAWSZE najpierw pobierz z Allegro cenniki dostaw + warunki, potem producentów – inaczej Base nie ma ich na liście i nie da się wybrać
+    if (!s.odswC) { log('   cenniki dostaw i warunki z Allegro: ' + await odswiezZAllegro('Odśwież cenniki', s.sklep)); s.odswC = true; return 'dalej'; }
+    if (!s.odswP) { log('   producenci odpowiedzialni z Allegro: ' + await odswiezZAllegro('Odśwież producentów', s.sklep)); s.odswP = true; return 'dalej'; }
     if (!await czekajNaFunkcje('openIntegrationSettings')) return 'nie wczytała się lista integracji';
     await czekaj(1500);
     const a = kontaAllegro().find(k => nn(k.sklep) === nn(s.sklep));
@@ -850,8 +849,7 @@
     const zle = sekcjaWStronie(sk, true).zle; await zamknijModal();
     const brak = r.bledy.filter(x => /brak opcji/.test(x));
     if (brak.length && s.proby.warunki < 2) {           // czegoś nie ma na liście → jeszcze raz pobierz z Allegro i spróbuj ponownie
-      if (war.includes('cennik') || brak.some(x => /return_policies|warranties/.test(x))) s.odswC = false;
-      if (war.includes('producent')) s.odswP = false;
+      s.odswC = false; s.odswP = false;
       log('   ↻ brakuje opcji – odświeżam z Allegro i próbuję jeszcze raz: ' + brak.join('; '));
       return 'ponów';
     }
