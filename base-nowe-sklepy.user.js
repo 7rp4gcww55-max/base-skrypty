@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base NOWE SKLEPY – hurtownia → Wysyłam z Allegro, Allegro, katalogi, importy, waga
-// @version      1.33
+// @version      1.34
 // @match        https://*.baselinker.com/*
 // @run-at       document-idle
 // @grant        none
@@ -628,6 +628,7 @@
     if (w.startsWith('$')) { const S = norm(w.slice(1)); return opts.find(o => o.value !== '' && norm(o.textContent).split(/[\s_]+/).pop().startsWith(S)); }
     const sens = opts.filter(o => o.value !== '' && !/^(brak |nie wybrano|--|wybierz)/i.test(o.textContent.trim()));
     if (w.startsWith('~')) return sens.find(o => norm(o.textContent).includes(norm(w.slice(1))));
+    if (w.startsWith('&')) { const cz = w.slice(1).split('+').map(norm).filter(Boolean); return sens.find(o => { const t = norm(o.textContent); return cz.every(c => t.includes(c)); }); }
     if (w.startsWith('*')) { if (sens.length === 1) return sens[0]; const f = norm(w.slice(1)).replace(/[^a-ząćęłńóśźż0-9]/g, ''); return f ? sens.find(o => norm(o.textContent).replace(/[^a-ząćęłńóśźż0-9]/g, '').includes(f.slice(0, 8))) : null; }
     return opts.find(o => norm(o.textContent) === norm(w)) || opts.find(o => norm(o.textContent).startsWith(norm(w)));
   }
@@ -831,9 +832,16 @@
     const hh = hurtownie()[z.hurtownia] || {}, firma = (hh.kurier || {}).firma || '';
     // nazwa warunków/producenta w Allegro: z 🏭 („Warunki w Allegro”), inaczej nazwa hurtowni; najpierw „NAZWA – Reklamacje/Gwarancja/Zwroty/Producent”, potem samo „NAZWA”, na końcu stare dopasowanie
     const wn = String(hh.warunkiNazwa || z.hurtownia).trim();
-    const wz = typ => '~' + wn + ' – ' + typ + '|~' + wn + ' - ' + typ + (hh.warunkiNazwa ? '|~' + wn : '');
+    // w Allegro prawie wszystko nazywa się teraz „AH NAZWA …”, a nazwa bywa dłuższa niż hurtownia (LEAN → AH LEANTOYS)
+    const ah = n => /^ah\b/i.test(n) ? n : 'AH ' + n;
+    const nazwy = [...new Set([wn, ah(wn), z.hurtownia, ah(z.hurtownia)].map(x => String(x).trim()).filter(Boolean))];
+    const wz = typ => [...nazwy.map(n => '~' + n + ' – ' + typ), ...nazwy.map(n => '~' + n + ' - ' + typ),
+      ...nazwy.map(n => '&' + n + '+' + typ)].join('|') + (hh.warunkiNazwa ? '|~' + wn : '');
+    // cennik: najpierw cennik tej hurtowni (AH NAZWA … KURIER), dopiero potem jakikolwiek KURIER/PACZKOMAT
+    const cennik = [...nazwy.map(n => '&' + n + '+KURIER'), ...nazwy.map(n => '&' + n + '+PACZKOMAT'),
+      '$KURIER', '$PACZKOMAT', '~KURIER', '~PACZKOMAT'].join('|');
     const sk = { nazwa: 'Warunki', tab: 'account_modal_options', kotwica: 'gallery_images_sort', wybory: {
-      link_delivery_schema: '$KURIER|$PACZKOMAT|~KURIER|~PACZKOMAT', implied_warranties_id: wz('Reklamacje') + '|*' + firma, warranties_id: wz('Gwarancja') + '|*', return_policies_id: wz('Zwroty') + '|*', link_responsible_producer: wz('Producent') + '|*' + firma } };
+      link_delivery_schema: cennik, implied_warranties_id: wz('Reklamacje') + '|*' + firma, warranties_id: wz('Gwarancja') + '|*', return_policies_id: wz('Zwroty') + '|*', link_responsible_producer: wz('Producent') + '|*' + firma } };
     for (const [w, , pole] of WARUNKI) if (!war.includes(w)) delete sk.wybory[pole];
     log('   warunki: ' + war.join(', '));
     const otworz = async () => { await zamknijModal(); W.openIntegrationSettings('allegro', a.id); const ok = await czekajNa(() => document.getElementById('gallery_images_sort'), 30000); await czekaj(2500); return ok; };
