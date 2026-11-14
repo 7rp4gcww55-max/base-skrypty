@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Base eksport katalogu (paczki po 10k)
-// @version      2026.11.14-6
+// @version      2026.11.14-7
 // @description  Ustawia katalog, filtry i 1000/stronę, zaznacza kolejne strony i pobiera CSV paczkami po max 10k
 // @match        https://*.baselinker.com/*
 // @match        http://*.baselinker.com/*
@@ -33,6 +33,7 @@
   const KLUCZ = 'baseEksportKatalogu';
   const KLUCZ_STAN = 'baseEksportKatalogu_stan';
   const KLUCZ_LOG = 'baseEksportKatalogu_log';
+  const KLUCZ_POZ = 'baseEksportKatalogu_pozycja';
   const DOMYSLNE = {
     katalog: '',              // nazwa katalogu Base (puste = zostaw bieżący)
     filtrujAuto: true,
@@ -570,8 +571,10 @@
     p.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9999999;width:310px;background:#1e2a38;color:#e8eef5;'
       + 'font:12px/1.45 -apple-system,sans-serif;padding:11px 12px;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.55)';
     const tyt = document.createElement('div');
-    tyt.textContent = '📦 Eksport katalogu paczkami';
-    tyt.style.cssText = 'font:bold 13px sans-serif;margin-bottom:7px';
+    tyt.textContent = '⠿ Eksport katalogu paczkami';
+    tyt.title = 'Przeciągnij, żeby przesunąć';
+    tyt.style.cssText = 'font:bold 13px sans-serif;margin:-11px -12px 7px;padding:9px 12px 7px;cursor:grab;'
+      + 'border-radius:12px 12px 0 0;background:#24374b;user-select:none';
     elInfo = document.createElement('div');
     elInfo.style.cssText = 'font-size:11px;opacity:.9;margin-bottom:7px';
     const ust = document.createElement('div');
@@ -600,9 +603,54 @@
 
     p.append(tyt, elInfo, ust, elPostep, elPrzyciski, elLog);
     document.body.appendChild(p);
+    przeciagaj(p, tyt);
     rysujPrzyciski();
     odswiezInfo();
     setInterval(() => { if (stan === 'stop') odswiezInfo(); }, 2000);
+  }
+
+  // panel da się przesuwać za pasek tytułu; pozycja zapamiętana między stronami
+  function przeciagaj(panelEl, uchwyt) {
+    const trzymajWEkranie = (x, y) => [
+      Math.min(Math.max(x, 0), Math.max(0, innerWidth - panelEl.offsetWidth)),
+      Math.min(Math.max(y, 0), Math.max(0, innerHeight - 40)),
+    ];
+    const ustaw = (x, y) => {
+      const [lx, ly] = trzymajWEkranie(x, y);
+      panelEl.style.left = lx + 'px';
+      panelEl.style.top = ly + 'px';
+      panelEl.style.right = 'auto';
+      panelEl.style.bottom = 'auto';
+    };
+    try {
+      const z = JSON.parse(localStorage.getItem(KLUCZ_POZ) || 'null');
+      if (z && typeof z.x === 'number') ustaw(z.x, z.y);
+    } catch {}
+
+    let dx = 0, dy = 0, ciagne = false;
+    uchwyt.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      const r = panelEl.getBoundingClientRect();
+      dx = e.clientX - r.left; dy = e.clientY - r.top;
+      ciagne = true;
+      uchwyt.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+    addEventListener('mousemove', e => { if (ciagne) ustaw(e.clientX - dx, e.clientY - dy); });
+    addEventListener('mouseup', () => {
+      if (!ciagne) return;
+      ciagne = false;
+      uchwyt.style.cursor = 'grab';
+      const r = panelEl.getBoundingClientRect();
+      try { localStorage.setItem(KLUCZ_POZ, JSON.stringify({ x: r.left, y: r.top })); } catch {}
+    });
+    // dwuklik w pasek = powrót w prawy dolny róg
+    uchwyt.addEventListener('dblclick', () => {
+      panelEl.style.cssText = panelEl.style.cssText.replace(/left:[^;]+;?/, '').replace(/top:[^;]+;?/, '');
+      panelEl.style.left = 'auto'; panelEl.style.top = 'auto';
+      panelEl.style.right = '14px'; panelEl.style.bottom = '14px';
+      try { localStorage.removeItem(KLUCZ_POZ); } catch {}
+    });
   }
 
   // ===================== START =====================
